@@ -121,6 +121,7 @@ app.get("/admin/dashboard", requireAdmin, async (req, res) => {
 
 
 
+
 // VENTI_PACK9_ADMIN_DASHBOARD_START
 function ventiAdminAuth(req, res, next) {
   const adminSecret = process.env.ADMIN_SECRET || "";
@@ -154,7 +155,7 @@ app.get("/admin/panel", (req, res) => {
     .wrap{max-width:1180px;margin:0 auto;padding:24px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
     h1{margin:0;font-size:28px}.muted{color:#94a3b8}
-    .card{background:#111827;border:1px solid #334155;border-radius:16px;padding:18px;box-shadow:0 10px 25px rgba(0,0,0,.2)}
+    .card{background:#111827;border:1px solid #334155;border-radius:16px;padding:18px}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}
     .metric .label{color:#94a3b8;font-size:13px}.metric .value{font-size:30px;font-weight:800;margin-top:8px}
     .section{margin-top:18px} table{width:100%;border-collapse:collapse;margin-top:10px}
@@ -181,16 +182,16 @@ app.get("/admin/panel", (req, res) => {
     <div id="status" class="section muted">Loading...</div>
 
     <div class="grid">
-      <div class="card metric"><div class="label">Today Sales</div><div id="todaySales" class="value">.00</div></div>
+      <div class="card metric"><div class="label">Today Sales</div><div id="todaySales" class="value">$0.00</div></div>
       <div class="card metric"><div class="label">Today Orders</div><div id="todayOrders" class="value">0</div></div>
-      <div class="card metric"><div class="label">Today Expenses</div><div id="todayExpenses" class="value">.00</div></div>
-      <div class="card metric"><div class="label">Customers</div><div id="customers" class="value">0</div></div>
+      <div class="card metric"><div class="label">Today Expenses</div><div id="todayExpenses" class="value">$0.00</div></div>
+      <div class="card metric"><div class="label">Synced Events</div><div id="customers" class="value">0</div></div>
     </div>
 
     <div class="section card">
       <h2>Recent Orders</h2>
       <table>
-        <thead><tr><th>Date</th><th>Receipt</th><th>Status</th><th>Total</th></tr></thead>
+        <thead><tr><th>Date</th><th>Receipt/ID</th><th>Status</th><th>Total</th></tr></thead>
         <tbody id="ordersBody"></tbody>
       </table>
     </div>
@@ -234,19 +235,19 @@ async function loadDash(){
   try{
     const r = await fetch("/admin/api/panel", { headers: { "x-admin-secret": getSecret() } });
     const j = await r.json();
-    if(!r.ok || !j.ok) throw new Error(j.error || "Dashboard failed");
+    if(!r.ok || !j.ok) throw new Error(j.error || j.message || "Dashboard failed");
 
     document.getElementById("todaySales").textContent = money(j.summary.today_sales);
     document.getElementById("todayOrders").textContent = j.summary.today_orders;
     document.getElementById("todayExpenses").textContent = money(j.summary.today_expenses);
-    document.getElementById("customers").textContent = j.summary.customers;
+    document.getElementById("customers").textContent = j.summary.synced_events;
 
     const orders = j.recent_orders || [];
     document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
       return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
-        "</td><td>" + esc(pick(o, ["receipt_no","receipt_number","id"], "")) +
+        "</td><td>" + esc(pick(o, ["receipt_no","receipt_number","id","local_id"], "")) +
         "</td><td>" + esc(pick(o, ["status","order_status"], "")) +
-        "</td><td>" + esc(money(pick(o, ["total","total_amount","grand_total","net_total"], 0))) +
+        "</td><td>" + esc(money(pick(o, ["total","total_amount","grand_total","net_total","amount"], 0))) +
         "</td></tr>";
     }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
 
@@ -274,35 +275,86 @@ loadDash();
 
 app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const isoToday = todayStart.toISOString();
-
     const safe = async (fn, fallback) => {
       try { return await fn(); } catch (e) { return fallback; }
     };
 
-    const countRows = async (table) => {
-      const { count, error } = await supabase.from(table).select("*", { count: "exact", head: true });
-      if (error) return 0;
-      return count || 0;
+    const parsePayload = (row) => {
+      const raw = row.payload || row.data || row.event_payload || row.body || null;
+      if (!raw) return null;
+      if (typeof raw === "object") return raw;
+      try { return JSON.parse(raw); } catch (e) { return null; }
     };
 
-    const recentOrders = await safe(async () => {
-      const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(25);
+    const rowType = (row, payload) => {
+      return String(row.entity || row.table_name || row.type || row.event_type || payload?.entity || payload?.table_name || payload?.type || "").toLowerCase();
+    };
+
+    const normalize = (row) => {
+      const payload = parsePayload(row) || {};
+      const data = payload.payload || payload.data || payload.record || payload;
+      const merged = Object.assign({}, data);
+      if (!merged.created_at) merged.created_at = row.created_at || row.inserted_at || row.time || "";
+      if (!merged.local_id && row.local_id) merged.local_id = row.local_id;
+      return merged;
+    };
+
+    let recentOrders = await safe(async () => {
+      const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(50);
       if (error) return [];
       return data || [];
     }, []);
 
-    const recentExpenses = await safe(async () => {
-      const { data, error } = await supabase.from("expenses").select("*").order("created_at", { ascending: false }).limit(25);
+    let recentExpenses = await safe(async () => {
+      const { data, error } = await supabase.from("expenses").select("*").order("created_at", { ascending: false }).limit(50);
       if (error) return [];
       return data || [];
     }, []);
+
+    const syncRows = await safe(async () => {
+      const { data, error } = await supabase.from("sync_events").select("*").order("created_at", { ascending: false }).limit(500);
+      if (error) return [];
+      return data || [];
+    }, []);
+
+    for (const r of syncRows) {
+      const p = parsePayload(r) || {};
+      const t = rowType(r, p);
+      const n = normalize(r);
+
+      if (t.includes("orders") || t === "order") {
+        recentOrders.push(n);
+      }
+
+      if (t.includes("expenses") || t === "expense") {
+        recentExpenses.push(n);
+      }
+    }
+
+    const seenOrders = new Set();
+    recentOrders = recentOrders.filter(o => {
+      const key = String(o.id || o.local_id || o.receipt_no || JSON.stringify(o));
+      if (seenOrders.has(key)) return false;
+      seenOrders.add(key);
+      return true;
+    }).slice(0, 50);
+
+    const seenExpenses = new Set();
+    recentExpenses = recentExpenses.filter(e => {
+      const key = String(e.id || e.local_id || e.note || JSON.stringify(e));
+      if (seenExpenses.has(key)) return false;
+      seenExpenses.add(key);
+      return true;
+    }).slice(0, 50);
+
+    const amountOf = (row) => Number(row.total || row.total_amount || row.grand_total || row.net_total || row.amount || 0);
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const isoToday = today.toISOString();
 
     const todayOrders = recentOrders.filter(o => String(o.created_at || o.order_date || o.date || "") >= isoToday);
     const todayExpensesRows = recentExpenses.filter(e => String(e.created_at || e.expense_date || e.date || "") >= isoToday);
-    const amountOf = (row) => Number(row.total || row.total_amount || row.grand_total || row.net_total || row.amount || 0);
 
     res.json({
       ok: true,
@@ -310,7 +362,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
         today_sales: todayOrders.reduce((s, o) => s + amountOf(o), 0),
         today_orders: todayOrders.length,
         today_expenses: todayExpensesRows.reduce((s, e) => s + amountOf(e), 0),
-        customers: await countRows("customers")
+        synced_events: syncRows.length
       },
       recent_orders: recentOrders,
       recent_expenses: recentExpenses,
@@ -321,5 +373,6 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
   }
 });
 // VENTI_PACK9_ADMIN_DASHBOARD_END
+
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
