@@ -322,11 +322,36 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       const t = rowType(r, p);
       const n = normalize(r);
 
-      if (t.includes("orders") || t === "order") {
+      const textBlob = JSON.stringify({ row: r, payload: p, normalized: n }).toLowerCase();
+
+      const looksLikeOrder =
+        t.includes("orders") || t === "order" ||
+        textBlob.includes('"orders"') ||
+        textBlob.includes('"order"') ||
+        n.total !== undefined ||
+        n.total_amount !== undefined ||
+        n.grand_total !== undefined ||
+        n.net_total !== undefined ||
+        n.balance !== undefined ||
+        n.table_id !== undefined ||
+        n.table_no !== undefined ||
+        n.cashier_id !== undefined ||
+        n.receipt_no !== undefined;
+
+      const looksLikeExpense =
+        t.includes("expenses") || t === "expense" ||
+        textBlob.includes('"expenses"') ||
+        textBlob.includes('"expense"') ||
+        n.expense_date !== undefined ||
+        n.category !== undefined ||
+        n.category_name !== undefined ||
+        n.expense_category !== undefined;
+
+      if (looksLikeOrder && !looksLikeExpense) {
         recentOrders.push(n);
       }
 
-      if (t.includes("expenses") || t === "expense") {
+      if (looksLikeExpense) {
         recentExpenses.push(n);
       }
     }
