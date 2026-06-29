@@ -138,10 +138,10 @@ function ventiAdminAuth(req, res, next) {
 }
 
 app.get("/admin", (req, res) => {
-  res.redirect("/admin/dashboard");
+  res.redirect("/admin/panel");
 });
 
-app.get("/admin/dashboard", (req, res) => {
+app.get("/admin/panel", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!doctype html>
 <html>
@@ -232,7 +232,7 @@ async function loadDash(){
   status.textContent = "Loading dashboard...";
   status.className = "section muted";
   try{
-    const r = await fetch("/admin/api/dashboard", { headers: { "x-admin-secret": getSecret() } });
+    const r = await fetch("/admin/api/panel", { headers: { "x-admin-secret": getSecret() } });
     const j = await r.json();
     if(!r.ok || !j.ok) throw new Error(j.error || "Dashboard failed");
 
@@ -272,7 +272,7 @@ loadDash();
 </html>`);
 });
 
-app.get("/admin/api/dashboard", ventiAdminAuth, async (req, res) => {
+app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
   try {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
