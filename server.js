@@ -119,6 +119,8 @@ app.get("/admin/dashboard", requireAdmin, async (req, res) => {
 });
 
 
+
+
 // VENTI_PACK9_ADMIN_DASHBOARD_START
 function ventiAdminAuth(req, res, next) {
   const adminSecret = process.env.ADMIN_SECRET || "";
@@ -151,18 +153,13 @@ app.get("/admin/dashboard", (req, res) => {
     body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#e5e7eb}
     .wrap{max-width:1180px;margin:0 auto;padding:24px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-    h1{margin:0;font-size:28px}
-    .muted{color:#94a3b8}
+    h1{margin:0;font-size:28px}.muted{color:#94a3b8}
     .card{background:#111827;border:1px solid #334155;border-radius:16px;padding:18px;box-shadow:0 10px 25px rgba(0,0,0,.2)}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}
-    .metric .label{color:#94a3b8;font-size:13px}
-    .metric .value{font-size:30px;font-weight:800;margin-top:8px}
-    .section{margin-top:18px}
-    table{width:100%;border-collapse:collapse;margin-top:10px}
+    .metric .label{color:#94a3b8;font-size:13px}.metric .value{font-size:30px;font-weight:800;margin-top:8px}
+    .section{margin-top:18px} table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{padding:11px;border-bottom:1px solid #334155;text-align:left;font-size:14px}
-    th{color:#cbd5e1}
-    button,input{border-radius:10px;border:1px solid #475569;background:#020617;color:#e5e7eb;padding:10px 12px}
-    button{cursor:pointer;background:#2563eb;border-color:#2563eb;font-weight:700}
+    th{color:#cbd5e1} button{border-radius:10px;border:1px solid #2563eb;background:#2563eb;color:#e5e7eb;padding:10px 12px;cursor:pointer;font-weight:700}
     .bad{color:#fca5a5}.good{color:#86efac}
     @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:520px){.grid{grid-template-columns:1fr}}
@@ -219,8 +216,16 @@ function setSecret(){
   if(s){ localStorage.setItem("VENTI_ADMIN_SECRET", s); loadDash(); }
 }
 function pick(obj, names, fallback){
-  for(const n of names){ if(obj && obj[n] !== undefined && obj[n] !== null) return obj[n]; }
+  for(let i=0;i<names.length;i++){
+    const n = names[i];
+    if(obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
+  }
   return fallback;
+}
+function esc(v){
+  return String(v === undefined || v === null ? "" : v).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c];
+  });
 }
 async function loadDash(){
   const status = document.getElementById("status");
@@ -236,23 +241,23 @@ async function loadDash(){
     document.getElementById("todayExpenses").textContent = money(j.summary.today_expenses);
     document.getElementById("customers").textContent = j.summary.customers;
 
-    document.getElementById("ordersBody").innerHTML = (j.recent_orders || []).map(o => `
-      <tr>
-        <td>${pick(o, ["created_at","order_date","date"], "")}</td>
-        <td>${pick(o, ["receipt_no","receipt_number","id"], "")}</td>
-        <td>${pick(o, ["status","order_status"], "")}</td>
-        <td>${money(pick(o, ["total","total_amount","grand_total","net_total"], 0))}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="4" class="muted">No recent orders</td></tr>`;
+    const orders = j.recent_orders || [];
+    document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
+      return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
+        "</td><td>" + esc(pick(o, ["receipt_no","receipt_number","id"], "")) +
+        "</td><td>" + esc(pick(o, ["status","order_status"], "")) +
+        "</td><td>" + esc(money(pick(o, ["total","total_amount","grand_total","net_total"], 0))) +
+        "</td></tr>";
+    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
 
-    document.getElementById("expensesBody").innerHTML = (j.recent_expenses || []).map(e => `
-      <tr>
-        <td>${pick(e, ["created_at","expense_date","date"], "")}</td>
-        <td>${pick(e, ["category","category_name","expense_category"], "")}</td>
-        <td>${pick(e, ["note","description","title"], "")}</td>
-        <td>${money(pick(e, ["amount","total"], 0))}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="4" class="muted">No recent expenses</td></tr>`;
+    const expenses = j.recent_expenses || [];
+    document.getElementById("expensesBody").innerHTML = expenses.length ? expenses.map(function(e){
+      return "<tr><td>" + esc(pick(e, ["created_at","expense_date","date"], "")) +
+        "</td><td>" + esc(pick(e, ["category","category_name","expense_category"], "")) +
+        "</td><td>" + esc(pick(e, ["note","description","title"], "")) +
+        "</td><td>" + esc(money(pick(e, ["amount","total"], 0))) +
+        "</td></tr>";
+    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent expenses</td></tr>";
 
     status.textContent = "Connected. Last refresh: " + new Date().toLocaleString();
     status.className = "section good";
@@ -295,16 +300,8 @@ app.get("/admin/api/dashboard", ventiAdminAuth, async (req, res) => {
       return data || [];
     }, []);
 
-    const todayOrders = recentOrders.filter(o => {
-      const d = o.created_at || o.order_date || o.date || "";
-      return d >= isoToday;
-    });
-
-    const todayExpensesRows = recentExpenses.filter(e => {
-      const d = e.created_at || e.expense_date || e.date || "";
-      return d >= isoToday;
-    });
-
+    const todayOrders = recentOrders.filter(o => String(o.created_at || o.order_date || o.date || "") >= isoToday);
+    const todayExpensesRows = recentExpenses.filter(e => String(e.created_at || e.expense_date || e.date || "") >= isoToday);
     const amountOf = (row) => Number(row.total || row.total_amount || row.grand_total || row.net_total || row.amount || 0);
 
     res.json({
