@@ -317,17 +317,35 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       return data || [];
     }, []);
 
-    for (const r of syncRows) {
-      const p = parsePayload(r) || {};
-      const t = rowType(r, p);
-      const n = normalize(r);
+    const getItemTable = (item) => {
+      return String(
+        item.entity ||
+        item.table_name ||
+        item.table ||
+        item.type ||
+        item.collection ||
+        item.model ||
+        ""
+      ).toLowerCase();
+    };
 
-      const textBlob = JSON.stringify({ row: r, payload: p, normalized: n }).toLowerCase();
+    const getItemPayload = (item) => {
+      return item.payload || item.data || item.record || item.row || item;
+    };
+
+    const pushPossibleItem = (item, parentRow) => {
+      const table = getItemTable(item);
+      const data = getItemPayload(item) || {};
+      const n = Object.assign({}, data);
+
+      if (!n.created_at) n.created_at = data.created_at || parentRow.created_at || parentRow.inserted_at || "";
+      if (!n.local_id) n.local_id = item.local_id || item.record_id || data.id || "";
+
+      const textBlob = JSON.stringify({ item, data, n }).toLowerCase();
 
       const looksLikeOrder =
-        t.includes("orders") || t === "order" ||
+        table.includes("orders") || table === "order" ||
         textBlob.includes('"orders"') ||
-        textBlob.includes('"order"') ||
         n.total !== undefined ||
         n.total_amount !== undefined ||
         n.grand_total !== undefined ||
@@ -335,24 +353,34 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
         n.balance !== undefined ||
         n.table_id !== undefined ||
         n.table_no !== undefined ||
-        n.cashier_id !== undefined ||
         n.receipt_no !== undefined;
 
       const looksLikeExpense =
-        t.includes("expenses") || t === "expense" ||
+        table.includes("expenses") || table === "expense" ||
         textBlob.includes('"expenses"') ||
-        textBlob.includes('"expense"') ||
         n.expense_date !== undefined ||
         n.category !== undefined ||
         n.category_name !== undefined ||
         n.expense_category !== undefined;
 
-      if (looksLikeOrder && !looksLikeExpense) {
-        recentOrders.push(n);
-      }
-
       if (looksLikeExpense) {
         recentExpenses.push(n);
+      } else if (looksLikeOrder) {
+        recentOrders.push(n);
+      }
+    };
+
+    for (const r of syncRows) {
+      const p = parsePayload(r) || {};
+
+      if (Array.isArray(p.items)) {
+        for (const item of p.items) pushPossibleItem(item, r);
+      } else if (Array.isArray(p.records)) {
+        for (const item of p.records) pushPossibleItem(item, r);
+      } else if (Array.isArray(p.data)) {
+        for (const item of p.data) pushPossibleItem(item, r);
+      } else {
+        pushPossibleItem(p, r);
       }
     }
 
