@@ -70,15 +70,80 @@ app.get("/health", async (_req, res) => {
 app.post("/sync/upload", requireDevice, async (req, res) => {
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : [];
+    const branchId = req.device.branch_id;
+    const deviceId = req.device.id;
+
+    const allowed = new Set(["orders", "order_items", "payments", "expenses"]);
+    const results = [];
+    let saved = 0;
+    let failed = 0;
+
+    const clean = (obj) => {
+      const out = {};
+      for (const [k, v] of Object.entries(obj || {})) {
+        if (v === undefined) continue;
+        out[k] = v;
+      }
+      return out;
+    };
+
+    const normalizeItem = (item) => {
+      const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
+      const data = item.payload || item.data || item.record || item.row || item;
+      return { entity, data: clean(data) };
+    };
+
+    for (const item of items) {
+      const { entity, data } = normalizeItem(item);
+
+      if (!allowed.has(entity)) {
+        results.push({ entity, ok: false, skipped: true, reason: "unsupported entity" });
+        continue;
+      }
+
+      try {
+        const row = clean({ ...data });
+
+        row.branch_id = row.branch_id || branchId;
+
+        if (entity === "orders") {
+          if (!row.order_date) row.order_date = row.created_at || new Date().toISOString();
+          if (!row.status) row.status = "open";
+          if (row.total_amount !== undefined && row.total === undefined) row.total = row.total_amount;
+          if (row.grand_total !== undefined && row.total === undefined) row.total = row.grand_total;
+          if (row.net_total !== undefined && row.total === undefined) row.total = row.net_total;
+          if (row.total === undefined) row.total = row.amount || 0;
+          if (row.paid === undefined) row.paid = 0;
+          if (row.balance === undefined) row.balance = Math.max(0, Number(row.total || 0) - Number(row.paid || 0));
+        }
+
+        if (entity === "expenses") {
+          if (!row.expense_date) row.expense_date = row.created_at || new Date().toISOString();
+          if (row.amount === undefined) row.amount = row.total || 0;
+        }
+
+        const { error } = await supabase.from(entity).upsert(row, { onConflict: "id" });
+        if (error) throw error;
+
+        saved++;
+        results.push({ entity, id: row.id || row.local_id || item.local_id || null, ok: true });
+      } catch (e) {
+        failed++;
+        results.push({ entity, id: item.local_id || item.record_id || null, ok: false, error: e.message || String(e) });
+      }
+    }
+
     await supabase.from("sync_events").insert({
-      branch_id: req.device.branch_id,
-      device_id: req.device.id,
+      branch_id: branchId,
+      device_id: deviceId,
       entity: "batch",
       local_id: String(items.length),
       action: "UPLOAD",
-      status: "received"
+      status: failed ? "partial" : "received",
+      error: failed ? JSON.stringify(results.filter(r => !r.ok).slice(0, 10)) : null
     });
-    res.json({ ok:true, received:items.length, message:"Upload endpoint ready. Full table sync comes next pack." });
+
+    res.json({ ok: failed === 0, received: items.length, saved, failed, results });
   } catch (e) {
     res.status(500).json({ ok:false, message:e.message || String(e) });
   }
