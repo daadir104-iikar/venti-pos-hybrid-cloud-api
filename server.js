@@ -73,21 +73,47 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
     const branchId = req.device.branch_id;
     const deviceId = req.device.id;
 
-    const allowed = new Set(["orders", "order_items", "payments", "expenses"]);
+    const allowedTables = new Set(["orders", "order_items", "payments", "expenses"]);
     const results = [];
     let saved = 0;
     let failed = 0;
+    let skipped = 0;
 
-    const clean = (obj) => {
+    const columnCache = {};
+
+    async function getColumns(table) {
+      if (columnCache[table]) return columnCache[table];
+
+      const { data, error } = await supabase.rpc("get_table_columns_safe", { table_name_input: table });
+
+      if (!error && Array.isArray(data)) {
+        columnCache[table] = new Set(data.map(r => r.column_name));
+        return columnCache[table];
+      }
+
+      // Fallback based on known Venti schema
+      const fallback = {
+        orders: ["branch_id","device_id","local_id","order_no","order_type","table_name","cashier_name","status","kitchen_status","subtotal","total","paid","balance","order_date","created_at"],
+        order_items: ["branch_id","local_id","local_order_id","item_name","menu_item_id","quantity","qty","price","unit_price","total","created_at"],
+        payments: ["branch_id","local_id","local_order_id","method","amount","paid_at","created_at"],
+        expenses: ["branch_id","local_id","category","description","amount","expense_date","created_at"]
+      };
+
+      columnCache[table] = new Set(fallback[table] || []);
+      return columnCache[table];
+    }
+
+    function clean(obj) {
       const out = {};
       for (const [k, v] of Object.entries(obj || {})) {
         if (v === undefined) continue;
+        if (v === "") continue;
         out[k] = v;
       }
       return out;
-    };
+    }
 
-    const normalizeItem = (item) => {
+    function parseItem(item) {
       const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
 
       let data = item.payload || item.data || item.record || item.row || null;
@@ -96,53 +122,111 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
         try { data = JSON.parse(item.payload_json); } catch (e) { data = null; }
       }
 
-      if (!data) data = item;
-
+      if (!data) data = {};
       data = clean(data);
 
-      if (!data.id && item.entity_id) data.id = item.entity_id;
-      if (!data.local_id && item.entity_id) data.local_id = String(item.entity_id);
+      const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
 
-      return { entity, data };
-    };
+      return { entity, data, localId };
+    }
+
+    function numberValue(...vals) {
+      for (const v of vals) {
+        if (v !== undefined && v !== null && v !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : 0;
+        }
+      }
+      return 0;
+    }
+
+    function buildRow(entity, data, localId) {
+      const now = new Date().toISOString();
+      const row = {};
+
+      row.branch_id = branchId;
+      row.local_id = localId || String(data.id || data.local_id || "");
+
+      if (entity === "orders") {
+        row.device_id = deviceId;
+        row.order_no = String(data.order_no || data.receipt_no || data.receipt_number || data.id || row.local_id || "");
+        row.order_type = String(data.order_type || data.type || data.table_name || "Walk-in");
+        row.table_name = String(data.table_name || data.table || data.table_no || data.table_id || "");
+        row.cashier_name = String(data.cashier_name || data.cashier || "admin");
+        row.status = String(data.status || "open");
+        row.kitchen_status = String(data.kitchen_status || "new");
+        row.subtotal = numberValue(data.subtotal, data.total, data.total_amount, data.grand_total, data.net_total, data.amount);
+        row.total = numberValue(data.total, data.total_amount, data.grand_total, data.net_total, data.amount, data.subtotal);
+        row.paid = numberValue(data.paid, data.paid_amount, 0);
+        row.balance = data.balance !== undefined ? numberValue(data.balance) : Math.max(0, row.total - row.paid);
+        row.order_date = data.order_date || data.created_at || now;
+        row.created_at = data.created_at || now;
+      }
+
+      if (entity === "order_items") {
+        row.local_order_id = String(data.order_id || data.local_order_id || data.order_local_id || "");
+        row.item_name = String(data.item_name || data.name || data.menu_name || data.product_name || "Item");
+        row.menu_item_id = data.menu_item_id || null;
+        row.quantity = numberValue(data.quantity, data.qty, 1);
+        row.qty = row.quantity;
+        row.price = numberValue(data.price, data.unit_price, data.amount, data.total);
+        row.unit_price = row.price;
+        row.total = numberValue(data.total, row.quantity * row.price);
+        row.created_at = data.created_at || now;
+      }
+
+      if (entity === "payments") {
+        row.local_order_id = String(data.order_id || data.local_order_id || data.order_local_id || "");
+        row.method = String(data.method || data.payment_method || "cash");
+        row.amount = numberValue(data.amount, data.paid, data.total);
+        row.paid_at = data.paid_at || data.created_at || now;
+        row.created_at = data.created_at || now;
+      }
+
+      if (entity === "expenses") {
+        row.category = String(data.category || data.category_name || data.expense_category || "General");
+        row.description = String(data.description || data.note || data.title || "");
+        row.amount = numberValue(data.amount, data.total);
+        row.expense_date = data.expense_date || data.date || data.created_at || now;
+        row.created_at = data.created_at || now;
+      }
+
+      return clean(row);
+    }
+
+    async function filterColumns(table, row) {
+      const cols = await getColumns(table);
+      const out = {};
+      for (const [k, v] of Object.entries(row)) {
+        if (cols.has(k)) out[k] = v;
+      }
+      return out;
+    }
 
     for (const item of items) {
-      const { entity, data } = normalizeItem(item);
+      const { entity, data, localId } = parseItem(item);
 
-      if (!allowed.has(entity)) {
-        results.push({ entity, ok: false, skipped: true, reason: "unsupported entity" });
+      if (!allowedTables.has(entity)) {
+        skipped++;
+        results.push({ entity, ok: true, skipped: true });
         continue;
       }
 
       try {
-        const row = clean({ ...data });
+        let row = buildRow(entity, data, localId);
+        row = await filterColumns(entity, row);
 
-        row.branch_id = row.branch_id || branchId;
+        if (!row.branch_id) row.branch_id = branchId;
+        if (!row.local_id) row.local_id = localId || String(data.id || "");
 
-        if (entity === "orders") {
-          if (!row.order_date) row.order_date = row.created_at || new Date().toISOString();
-          if (!row.status) row.status = "open";
-          if (row.total_amount !== undefined && row.total === undefined) row.total = row.total_amount;
-          if (row.grand_total !== undefined && row.total === undefined) row.total = row.grand_total;
-          if (row.net_total !== undefined && row.total === undefined) row.total = row.net_total;
-          if (row.total === undefined) row.total = row.amount || 0;
-          if (row.paid === undefined) row.paid = 0;
-          if (row.balance === undefined) row.balance = Math.max(0, Number(row.total || 0) - Number(row.paid || 0));
-        }
-
-        if (entity === "expenses") {
-          if (!row.expense_date) row.expense_date = row.created_at || new Date().toISOString();
-          if (row.amount === undefined) row.amount = row.total || 0;
-        }
-
-        const { error } = await supabase.from(entity).upsert(row, { onConflict: "id" });
+        const { error } = await supabase.from(entity).insert(row);
         if (error) throw error;
 
         saved++;
-        results.push({ entity, id: row.id || row.local_id || item.local_id || null, ok: true });
+        results.push({ entity, local_id: row.local_id, ok: true });
       } catch (e) {
         failed++;
-        results.push({ entity, id: item.local_id || item.record_id || null, ok: false, error: e.message || String(e) });
+        results.push({ entity, local_id: localId || null, ok: false, error: e.message || String(e) });
       }
     }
 
@@ -156,7 +240,7 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
       error: failed ? JSON.stringify(results.filter(r => !r.ok).slice(0, 10)) : null
     });
 
-    res.json({ ok: failed === 0, received: items.length, saved, failed, results });
+    res.json({ ok: failed === 0, received: items.length, saved, failed, skipped, results });
   } catch (e) {
     res.status(500).json({ ok:false, message:e.message || String(e) });
   }
