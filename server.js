@@ -89,8 +89,21 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
 
     const normalizeItem = (item) => {
       const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
-      const data = item.payload || item.data || item.record || item.row || item;
-      return { entity, data: clean(data) };
+
+      let data = item.payload || item.data || item.record || item.row || null;
+
+      if (!data && item.payload_json) {
+        try { data = JSON.parse(item.payload_json); } catch (e) { data = null; }
+      }
+
+      if (!data) data = item;
+
+      data = clean(data);
+
+      if (!data.id && item.entity_id) data.id = item.entity_id;
+      if (!data.local_id && item.entity_id) data.local_id = String(item.entity_id);
+
+      return { entity, data };
     };
 
     for (const item of items) {
