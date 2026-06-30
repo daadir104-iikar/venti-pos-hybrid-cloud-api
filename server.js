@@ -513,7 +513,15 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       let paid = Number(o.paid || o.amount_paid || 0);
       for (const k of keys) paid += Number(paidByOrderKey.get(k) || 0);
       const balance = o.balance !== undefined && o.balance !== null ? Number(o.balance || 0) : Math.max(0, total - paid);
-      const computedStatus = (total > 0 && (paid >= total || balance <= 0)) ? "Paid" : (o.status || o.order_status || "Open");
+      let computedStatus = (total > 0 && (paid >= total || balance <= 0)) ? "Paid" : (o.status || o.order_status || "Open");
+
+      // Dashboard fallback: older synced cloud rows may have status Open even after POS payment.
+      // If the row has a positive total and no reliable balance field, treat it as Paid for sales reporting.
+      const hasReliableBalance = o.balance !== undefined && o.balance !== null && String(o.balance).trim() !== "";
+      const hasReliablePaid = o.paid !== undefined && o.paid !== null && String(o.paid).trim() !== "";
+      if (String(computedStatus).toLowerCase() === "open" && total > 0 && !hasReliableBalance && !hasReliablePaid) {
+        computedStatus = "Paid";
+      }
       return Object.assign({}, o, {
         display_id: displayId,
         display_status: computedStatus,
