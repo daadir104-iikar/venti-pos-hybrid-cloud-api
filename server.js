@@ -73,49 +73,22 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
     const branchId = req.device.branch_id;
     const deviceId = req.device.id;
 
-    const allowedTables = new Set(["orders", "order_items", "payments", "expenses"]);
-    const results = [];
     let saved = 0;
     let failed = 0;
     let skipped = 0;
+    const results = [];
 
-    const columnCache = {};
+    const { data: colRows, error: colError } = await supabase.rpc("get_table_columns_safe", { table_name_input: "orders" });
+    if (colError) throw colError;
 
-    async function getColumns(table) {
-      if (columnCache[table]) return columnCache[table];
+    const orderCols = new Set((colRows || []).map(r => r.column_name));
 
-      const { data, error } = await supabase.rpc("get_table_columns_safe", { table_name_input: table });
-
-      if (!error && Array.isArray(data)) {
-        columnCache[table] = new Set(data.map(r => r.column_name));
-        return columnCache[table];
-      }
-
-      // Fallback based on known Venti schema
-      const fallback = {
-        orders: ["branch_id","device_id","local_id","order_no","order_type","table_name","cashier_name","status","kitchen_status","subtotal","total","paid","balance","order_date","created_at"],
-        order_items: ["branch_id","local_id","local_order_id","item_name","menu_item_id","quantity","qty","price","unit_price","total","created_at"],
-        payments: ["branch_id","local_id","local_order_id","method","amount","paid_at","created_at"],
-        expenses: ["branch_id","local_id","category","description","amount","expense_date","created_at"]
-      };
-
-      columnCache[table] = new Set(fallback[table] || []);
-      return columnCache[table];
+    function safeNumber(v, fallback = 0) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
     }
 
-    function clean(obj) {
-      const out = {};
-      for (const [k, v] of Object.entries(obj || {})) {
-        if (v === undefined) continue;
-        if (v === "") continue;
-        out[k] = v;
-      }
-      return out;
-    }
-
-    function parseItem(item) {
-      const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
-
+    function parsePayload(item) {
       let data = item.payload || item.data || item.record || item.row || null;
 
       if (!data && item.payload_json) {
@@ -123,110 +96,58 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
       }
 
       if (!data) data = {};
-      data = clean(data);
-
-      const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
-
-      return { entity, data, localId };
+      return data;
     }
 
-    function numberValue(...vals) {
-      for (const v of vals) {
-        if (v !== undefined && v !== null && v !== "") {
-          const n = Number(v);
-          return Number.isFinite(n) ? n : 0;
-        }
+    function put(row, key, value) {
+      if (orderCols.has(key) && value !== undefined && value !== null && value !== "") {
+        row[key] = value;
       }
-      return 0;
-    }
-
-    function buildRow(entity, data, localId) {
-      const now = new Date().toISOString();
-      const row = {};
-
-      row.branch_id = branchId;
-      row.local_id = localId || String(data.id || data.local_id || "");
-
-      if (entity === "orders") {
-        row.device_id = deviceId;
-        row.order_no = String(data.order_no || data.receipt_no || data.receipt_number || data.id || row.local_id || "");
-        row.order_type = String(data.order_type || data.type || data.table_name || "Walk-in");
-        row.table_name = String(data.table_name || data.table || data.table_no || data.table_id || "");
-        row.cashier_name = String(data.cashier_name || data.cashier || "admin");
-        row.status = String(data.status || "open");
-        row.kitchen_status = String(data.kitchen_status || "new");
-        row.subtotal = numberValue(data.subtotal, data.total, data.total_amount, data.grand_total, data.net_total, data.amount);
-        row.total = numberValue(data.total, data.total_amount, data.grand_total, data.net_total, data.amount, data.subtotal);
-        row.paid = numberValue(data.paid, data.paid_amount, 0);
-        row.balance = data.balance !== undefined ? numberValue(data.balance) : Math.max(0, row.total - row.paid);
-        row.order_date = data.order_date || data.created_at || now;
-        row.created_at = data.created_at || now;
-      }
-
-      if (entity === "order_items") {
-        row.local_order_id = String(data.order_id || data.local_order_id || data.order_local_id || "");
-        row.item_name = String(data.item_name || data.name || data.menu_name || data.product_name || "Item");
-        row.menu_item_id = data.menu_item_id || null;
-        row.quantity = numberValue(data.quantity, data.qty, 1);
-        row.qty = row.quantity;
-        row.price = numberValue(data.price, data.unit_price, data.amount, data.total);
-        row.unit_price = row.price;
-        row.total = numberValue(data.total, row.quantity * row.price);
-        row.created_at = data.created_at || now;
-      }
-
-      if (entity === "payments") {
-        row.local_order_id = String(data.order_id || data.local_order_id || data.order_local_id || "");
-        row.method = String(data.method || data.payment_method || "cash");
-        row.amount = numberValue(data.amount, data.paid, data.total);
-        row.paid_at = data.paid_at || data.created_at || now;
-        row.created_at = data.created_at || now;
-      }
-
-      if (entity === "expenses") {
-        row.category = String(data.category || data.category_name || data.expense_category || "General");
-        row.description = String(data.description || data.note || data.title || "");
-        row.amount = numberValue(data.amount, data.total);
-        row.expense_date = data.expense_date || data.date || data.created_at || now;
-        row.created_at = data.created_at || now;
-      }
-
-      return clean(row);
-    }
-
-    async function filterColumns(table, row) {
-      const cols = await getColumns(table);
-      const out = {};
-      for (const [k, v] of Object.entries(row)) {
-        if (cols.has(k)) out[k] = v;
-      }
-      return out;
     }
 
     for (const item of items) {
-      const { entity, data, localId } = parseItem(item);
+      const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
 
-      if (!allowedTables.has(entity)) {
+      if (entity !== "orders") {
         skipped++;
-        results.push({ entity, ok: true, skipped: true });
         continue;
       }
 
       try {
-        let row = buildRow(entity, data, localId);
-        row = await filterColumns(entity, row);
+        const data = parsePayload(item);
+        const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
+        const now = new Date().toISOString();
 
-        if (!row.branch_id) row.branch_id = branchId;
-        if (!row.local_id) row.local_id = localId || String(data.id || "");
+        const total = safeNumber(data.total ?? data.total_amount ?? data.grand_total ?? data.net_total ?? data.amount ?? data.subtotal, 0);
+        const paid = safeNumber(data.paid ?? data.paid_amount, 0);
+        const balance = data.balance !== undefined ? safeNumber(data.balance, Math.max(0, total - paid)) : Math.max(0, total - paid);
 
-        const { error } = await supabase.from(entity).insert(row);
+        const row = {};
+
+        put(row, "branch_id", branchId);
+        put(row, "device_id", deviceId);
+        put(row, "local_id", localId);
+        put(row, "order_no", String(data.order_no || data.receipt_no || data.receipt_number || data.id || localId || Date.now()));
+        put(row, "order_type", String(data.order_type || data.type || "Walk-in"));
+        put(row, "table_name", String(data.table_name || data.table || data.table_no || data.table_id || "Walk-in"));
+        put(row, "cashier_name", String(data.cashier_name || data.cashier || "admin"));
+        put(row, "status", String(data.status || "open"));
+        put(row, "kitchen_status", String(data.kitchen_status || "new"));
+        put(row, "subtotal", safeNumber(data.subtotal ?? total, total));
+        put(row, "total", total);
+        put(row, "paid", paid);
+        put(row, "balance", balance);
+        put(row, "order_date", data.order_date || data.created_at || now);
+        put(row, "created_at", data.created_at || now);
+
+        const { error } = await supabase.from("orders").insert(row);
         if (error) throw error;
 
         saved++;
-        results.push({ entity, local_id: row.local_id, ok: true });
+        results.push({ ok: true, entity: "orders", local_id: localId, total });
       } catch (e) {
         failed++;
-        results.push({ entity, local_id: localId || null, ok: false, error: e.message || String(e) });
+        results.push({ ok: false, entity: "orders", error: e.message || String(e) });
       }
     }
 
