@@ -330,7 +330,7 @@ async function loadDash(){
     document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
       return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
         "</td><td>" + esc(pick(o, ["display_id","order_no","local_id","receipt_no","receipt_number","id"], "")) +
-        "</td><td>" + esc(pick(o, ["status","order_status"], "")) +
+        "</td><td>" + esc(pick(o, ["display_status","status","order_status"], "")) +
         "</td><td>" + esc(money(pick(o, ["display_total","total","total_amount","grand_total","net_total","amount"], 0))) +
         "</td></tr>";
     }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
