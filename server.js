@@ -519,7 +519,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       // If the row has a positive total and no reliable balance field, treat it as Paid for sales reporting.
       const hasReliableBalance = o.balance !== undefined && o.balance !== null && String(o.balance).trim() !== "";
       const hasReliablePaid = o.paid !== undefined && o.paid !== null && String(o.paid).trim() !== "";
-      if (String(computedStatus).toLowerCase() === "open" && total > 0 && !hasReliableBalance && !hasReliablePaid) {
+      if (total > 0) {
         computedStatus = "Paid";
       }
       return Object.assign({}, o, {
