@@ -329,9 +329,9 @@ async function loadDash(){
     const orders = j.recent_orders || [];
     document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
       return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
-        "</td><td>" + esc(pick(o, ["receipt_no","receipt_number","id","local_id"], "")) +
+        "</td><td>" + esc(pick(o, ["display_id","order_no","local_id","receipt_no","receipt_number","id"], "")) +
         "</td><td>" + esc(pick(o, ["status","order_status"], "")) +
-        "</td><td>" + esc(money(pick(o, ["total","total_amount","grand_total","net_total","amount"], 0))) +
+        "</td><td>" + esc(money(pick(o, ["display_total","total","total_amount","grand_total","net_total","amount"], 0))) +
         "</td></tr>";
     }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
 
@@ -391,6 +391,12 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
     let recentExpenses = await safe(async () => {
       const { data, error } = await supabase.from("expenses").select("*").order("created_at", { ascending: false }).limit(50);
+      if (error) return [];
+      return data || [];
+    }, []);
+
+    let recentPayments = await safe(async () => {
+      const { data, error } = await supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500);
       if (error) return [];
       return data || [];
     }, []);
@@ -485,6 +491,35 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
     }).slice(0, 50);
 
     const amountOf = (row) => Number(row.total || row.total_amount || row.grand_total || row.net_total || row.amount || 0);
+
+    const paidByOrderKey = new Map();
+    for (const p of recentPayments || []) {
+      const keys = [
+        p.order_id,
+        p.local_order_id,
+        p.order_local_id
+      ].filter(v => v !== undefined && v !== null && String(v).trim() !== "").map(v => String(v));
+      const amt = Number(p.amount || p.total || 0);
+      for (const k of keys) {
+        paidByOrderKey.set(k, Number(paidByOrderKey.get(k) || 0) + amt);
+      }
+    }
+
+    recentOrders = recentOrders.map((o) => {
+      const local = o.local_id || o.order_no || o.receipt_no || "";
+      const displayId = local ? ("Order #" + local) : String(o.id || "");
+      const total = amountOf(o);
+      const keys = [o.id, o.local_id, o.order_id].filter(v => v !== undefined && v !== null && String(v).trim() !== "").map(v => String(v));
+      let paid = Number(o.paid || o.amount_paid || 0);
+      for (const k of keys) paid += Number(paidByOrderKey.get(k) || 0);
+      const balance = o.balance !== undefined && o.balance !== null ? Number(o.balance || 0) : Math.max(0, total - paid);
+      const computedStatus = (total > 0 && (paid >= total || balance <= 0)) ? "Paid" : (o.status || o.order_status || "Open");
+      return Object.assign({}, o, {
+        display_id: displayId,
+        display_status: computedStatus,
+        display_total: total
+      });
+    });
 
     // Venti Cafe local day: Mogadishu/Nairobi time UTC+3
     const VENTI_TZ_OFFSET_MIN = Number(process.env.VENTI_TZ_OFFSET_MIN || 180);
