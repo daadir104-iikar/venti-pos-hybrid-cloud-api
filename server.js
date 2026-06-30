@@ -486,12 +486,36 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
     const amountOf = (row) => Number(row.total || row.total_amount || row.grand_total || row.net_total || row.amount || 0);
 
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const isoToday = today.toISOString();
+    // Venti Cafe local day: Mogadishu/Nairobi time UTC+3
+    const VENTI_TZ_OFFSET_MIN = Number(process.env.VENTI_TZ_OFFSET_MIN || 180);
 
-    const todayOrders = recentOrders.filter(o => String(o.created_at || o.order_date || o.date || "") >= isoToday);
-    const todayExpensesRows = recentExpenses.filter(e => String(e.created_at || e.expense_date || e.date || "") >= isoToday);
+    const startOfLocalDayUtcMs = (offsetMin) => {
+      const now = new Date();
+      const local = new Date(now.getTime() + offsetMin * 60000);
+      local.setUTCHours(0, 0, 0, 0);
+      return local.getTime() - offsetMin * 60000;
+    };
+
+    const endOfLocalDayUtcMs = (offsetMin) => startOfLocalDayUtcMs(offsetMin) + 24 * 60 * 60 * 1000;
+
+    const rowTimeMs = (row) => {
+      const raw = row.created_at || row.order_date || row.expense_date || row.date || row.inserted_at || "";
+      const t = Date.parse(String(raw));
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    const dayStartMs = startOfLocalDayUtcMs(VENTI_TZ_OFFSET_MIN);
+    const dayEndMs = endOfLocalDayUtcMs(VENTI_TZ_OFFSET_MIN);
+
+    const todayOrders = recentOrders.filter(o => {
+      const t = rowTimeMs(o);
+      return t >= dayStartMs && t < dayEndMs;
+    });
+
+    const todayExpensesRows = recentExpenses.filter(e => {
+      const t = rowTimeMs(e);
+      return t >= dayStartMs && t < dayEndMs;
+    });
 
     res.json({
       ok: true,
