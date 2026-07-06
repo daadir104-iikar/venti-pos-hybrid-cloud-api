@@ -353,6 +353,326 @@ app.get("/admin", (req, res) => {
   res.redirect("/admin/panel");
 });
 
+
+
+// ADMIN REPORTS PHASE 1
+function reportAdminOk(req) {
+  const configured = String(process.env.ADMIN_SECRET || process.env.ADMIN_PASSWORD || "1234");
+  const given = String(req.headers["x-admin-secret"] || req.query.secret || "");
+  return configured && given === configured;
+}
+
+function requireReportAdmin(req, res) {
+  if (!reportAdminOk(req)) {
+    res.status(401).send("Unauthorized");
+    return false;
+  }
+  return true;
+}
+
+function reportMoney(n) {
+  return "$" + Number(n || 0).toFixed(2);
+}
+
+function reportHtmlEscape(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function reportCsvCell(v) {
+  const text = String(v ?? "");
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function sendReportCsv(res, filename, headers, rows) {
+  const lines = [];
+  lines.push(headers.map(h => reportCsvCell(h.label)).join(","));
+  for (const row of rows) {
+    lines.push(headers.map(h => reportCsvCell(row[h.key])).join(","));
+  }
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", "attachment; filename=" + filename);
+  res.send(lines.join("\r\n"));
+}
+
+function reportRange(req) {
+  const offsetMin = Number(process.env.VENTI_TZ_OFFSET_MIN || 180);
+  const dateText = String(req.query.date || "").slice(0, 10);
+  let startMs;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    const parts = dateText.split("-").map(Number);
+    startMs = Date.UTC(parts[0], parts[1] - 1, parts[2]) - offsetMin * 60000;
+  } else {
+    const now = new Date();
+    const local = new Date(now.getTime() + offsetMin * 60000);
+    local.setUTCHours(0, 0, 0, 0);
+    startMs = local.getTime() - offsetMin * 60000;
+  }
+
+  const endMs = startMs + 24 * 60 * 60 * 1000;
+  const label = new Date(startMs + offsetMin * 60000).toISOString().slice(0, 10);
+
+  return {
+    startMs,
+    endMs,
+    startIso: new Date(startMs).toISOString(),
+    endIso: new Date(endMs).toISOString(),
+    label
+  };
+}
+
+function reportRowTimeMs(row, keys) {
+  for (const key of keys) {
+    if (row && row[key]) {
+      const t = Date.parse(String(row[key]));
+      if (Number.isFinite(t)) return t;
+    }
+  }
+  return 0;
+}
+
+async function getReportOrders(range) {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if (error) throw error;
+
+  return (data || []).filter(row => {
+    const t = reportRowTimeMs(row, ["order_date", "created_at"]);
+    return t >= range.startMs && t < range.endMs;
+  });
+}
+
+async function getReportExpenses(range) {
+  const { data, error } = await supabase
+    .from("expenses")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if (error) throw error;
+
+  return (data || []).filter(row => {
+    const t = reportRowTimeMs(row, ["created_at", "expense_date", "date"]);
+    return t >= range.startMs && t < range.endMs;
+  });
+}
+
+function makePrintPage(title, subtitle, summaryHtml, tableHtml) {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>' + reportHtmlEscape(title) + '</title>' +
+    '<style>' +
+    'body{font-family:Arial,Helvetica,sans-serif;margin:28px;color:#111;background:#fff}' +
+    'h1{margin:0 0 6px;font-size:26px} .muted{color:#555;margin-bottom:18px}' +
+    '.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}' +
+    'button{padding:10px 14px;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}' +
+    '.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}' +
+    '.card{border:1px solid #ddd;border-radius:10px;padding:12px}.card span{display:block;color:#666;font-size:12px}.card strong{font-size:20px}' +
+    'table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #ddd;padding:9px;text-align:left;font-size:13px}th{background:#f4f4f4}' +
+    '.right{text-align:right}' +
+    '@media print{button{display:none}body{margin:14px}.card{break-inside:avoid}}' +
+    '</style></head><body>' +
+    '<div class="top"><div><h1>' + reportHtmlEscape(title) + '</h1><div class="muted">' + reportHtmlEscape(subtitle) + '</div></div>' +
+    '<button onclick="window.print()">Print / Save PDF</button></div>' +
+    summaryHtml +
+    tableHtml +
+    '</body></html>';
+}
+
+app.get("/admin/report/daily-sales.csv", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const orders = await getReportOrders(range);
+
+    const rows = orders.map(o => ({
+      date: o.order_date || o.created_at || "",
+      receipt: o.order_no || o.local_id || o.id || "",
+      status: o.status || "",
+      total: Number(o.total || 0).toFixed(2),
+      paid: Number(o.paid || 0).toFixed(2),
+      balance: Number(o.balance || 0).toFixed(2),
+      cashier: o.cashier_username || o.cashier_name || "",
+      branch_id: o.branch_id || ""
+    }));
+
+    sendReportCsv(res, "daily-sales-" + range.label + ".csv", [
+      { key: "date", label: "Date" },
+      { key: "receipt", label: "Receipt/ID" },
+      { key: "status", label: "Status" },
+      { key: "total", label: "Total" },
+      { key: "paid", label: "Paid" },
+      { key: "balance", label: "Balance" },
+      { key: "cashier", label: "Cashier" },
+      { key: "branch_id", label: "Branch ID" }
+    ], rows);
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+app.get("/admin/report/expenses.csv", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const expenses = await getReportExpenses(range);
+
+    const rows = expenses.map(x => ({
+      date: x.created_at || x.expense_date || "",
+      category: x.category || "",
+      note: x.description || x.note || "",
+      method: x.payment_method || x.method || "",
+      amount: Number(x.amount || 0).toFixed(2),
+      branch_id: x.branch_id || ""
+    }));
+
+    sendReportCsv(res, "expenses-" + range.label + ".csv", [
+      { key: "date", label: "Date" },
+      { key: "category", label: "Category" },
+      { key: "note", label: "Note" },
+      { key: "method", label: "Payment Method" },
+      { key: "amount", label: "Amount" },
+      { key: "branch_id", label: "Branch ID" }
+    ], rows);
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+app.get("/admin/report/profit.csv", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const orders = await getReportOrders(range);
+    const expenses = await getReportExpenses(range);
+
+    const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
+    const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
+    const expenseTotal = expenses.reduce((s, x) => s + Number(x.amount || 0), 0);
+    const profit = sales - expenseTotal;
+
+    sendReportCsv(res, "profit-" + range.label + ".csv", [
+      { key: "metric", label: "Metric" },
+      { key: "value", label: "Value" }
+    ], [
+      { metric: "Date", value: range.label },
+      { metric: "Orders Count", value: orders.length },
+      { metric: "Sales Total", value: sales.toFixed(2) },
+      { metric: "Paid Total", value: paid.toFixed(2) },
+      { metric: "Expenses Total", value: expenseTotal.toFixed(2) },
+      { metric: "Profit", value: profit.toFixed(2) }
+    ]);
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+app.get("/admin/report/daily-sales/print", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const orders = await getReportOrders(range);
+    const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
+    const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
+
+    const summary = '<div class="summary">' +
+      '<div class="card"><span>Date</span><strong>' + reportHtmlEscape(range.label) + '</strong></div>' +
+      '<div class="card"><span>Orders</span><strong>' + orders.length + '</strong></div>' +
+      '<div class="card"><span>Total Sales</span><strong>' + reportMoney(sales) + '</strong></div>' +
+      '<div class="card"><span>Total Paid</span><strong>' + reportMoney(paid) + '</strong></div>' +
+      '</div>';
+
+    const rows = orders.map(o => '<tr>' +
+      '<td>' + reportHtmlEscape(o.order_date || o.created_at || "") + '</td>' +
+      '<td>' + reportHtmlEscape(o.order_no || o.local_id || o.id || "") + '</td>' +
+      '<td>' + reportHtmlEscape(o.status || "") + '</td>' +
+      '<td class="right">' + reportMoney(o.total) + '</td>' +
+      '<td class="right">' + reportMoney(o.paid) + '</td>' +
+      '</tr>').join("");
+
+    const table = '<table><thead><tr><th>Date</th><th>Receipt/ID</th><th>Status</th><th class="right">Total</th><th class="right">Paid</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="5">No sales today</td></tr>') +
+      '</tbody></table>';
+
+    res.send(makePrintPage("Daily Sales Report", "Print or save as PDF", summary, table));
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+app.get("/admin/report/expenses/print", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const expenses = await getReportExpenses(range);
+    const total = expenses.reduce((s, x) => s + Number(x.amount || 0), 0);
+
+    const summary = '<div class="summary">' +
+      '<div class="card"><span>Date</span><strong>' + reportHtmlEscape(range.label) + '</strong></div>' +
+      '<div class="card"><span>Expenses</span><strong>' + expenses.length + '</strong></div>' +
+      '<div class="card"><span>Total Expenses</span><strong>' + reportMoney(total) + '</strong></div>' +
+      '<div class="card"><span>Report</span><strong>Expenses</strong></div>' +
+      '</div>';
+
+    const rows = expenses.map(x => '<tr>' +
+      '<td>' + reportHtmlEscape(x.created_at || x.expense_date || "") + '</td>' +
+      '<td>' + reportHtmlEscape(x.category || "") + '</td>' +
+      '<td>' + reportHtmlEscape(x.description || x.note || "") + '</td>' +
+      '<td>' + reportHtmlEscape(x.payment_method || x.method || "") + '</td>' +
+      '<td class="right">' + reportMoney(x.amount) + '</td>' +
+      '</tr>').join("");
+
+    const table = '<table><thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Method</th><th class="right">Amount</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="5">No expenses today</td></tr>') +
+      '</tbody></table>';
+
+    res.send(makePrintPage("Expenses Report", "Print or save as PDF", summary, table));
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+app.get("/admin/report/profit/print", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+    const range = reportRange(req);
+    const orders = await getReportOrders(range);
+    const expenses = await getReportExpenses(range);
+
+    const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
+    const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
+    const expenseTotal = expenses.reduce((s, x) => s + Number(x.amount || 0), 0);
+    const profit = sales - expenseTotal;
+
+    const summary = '<div class="summary">' +
+      '<div class="card"><span>Date</span><strong>' + reportHtmlEscape(range.label) + '</strong></div>' +
+      '<div class="card"><span>Sales</span><strong>' + reportMoney(sales) + '</strong></div>' +
+      '<div class="card"><span>Expenses</span><strong>' + reportMoney(expenseTotal) + '</strong></div>' +
+      '<div class="card"><span>Profit</span><strong>' + reportMoney(profit) + '</strong></div>' +
+      '</div>';
+
+    const table = '<table><thead><tr><th>Metric</th><th class="right">Value</th></tr></thead><tbody>' +
+      '<tr><td>Orders Count</td><td class="right">' + orders.length + '</td></tr>' +
+      '<tr><td>Sales Total</td><td class="right">' + reportMoney(sales) + '</td></tr>' +
+      '<tr><td>Paid Total</td><td class="right">' + reportMoney(paid) + '</td></tr>' +
+      '<tr><td>Expenses Total</td><td class="right">' + reportMoney(expenseTotal) + '</td></tr>' +
+      '<tr><td>Profit</td><td class="right">' + reportMoney(profit) + '</td></tr>' +
+      '</tbody></table>';
+
+    res.send(makePrintPage("Profit Report", "Print or save as PDF", summary, table));
+  } catch (e) {
+    res.status(500).send(e.message || String(e));
+  }
+});
+
+// END ADMIN REPORTS PHASE 1
+
 app.get("/admin/panel", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!doctype html>
@@ -401,7 +721,21 @@ app.get("/admin/panel", (req, res) => {
     </div>
 
     <div class="section card">
-      <h2>Recent Orders</h2>
+      
+            <section class="panel reports-phase1">
+              <h2>Reports</h2>
+              <p class="muted">PDF buttons open a print page. Choose Print → Save as PDF.</p>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">
+                <button onclick="openReport('/admin/report/daily-sales/print')">Daily Sales PDF</button>
+                <button onclick="openReport('/admin/report/expenses/print')">Expenses PDF</button>
+                <button onclick="openReport('/admin/report/profit/print')">Profit PDF</button>
+                <button onclick="openReport('/admin/report/daily-sales.csv')">Daily Sales CSV</button>
+                <button onclick="openReport('/admin/report/expenses.csv')">Expenses CSV</button>
+                <button onclick="openReport('/admin/report/profit.csv')">Profit CSV</button>
+              </div>
+            </section>
+
+<h2>Recent Orders</h2>
       <table>
         <thead><tr><th>Date</th><th>Receipt/ID</th><th>Status</th><th>Total</th></tr></thead>
         <tbody id="ordersBody"></tbody>
@@ -440,6 +774,13 @@ function getSecret(){
   if(!s){ s = prompt("Enter ADMIN_SECRET"); if(s) localStorage.setItem("VENTI_ADMIN_SECRET", s); }
   return s || "";
 }
+
+function openReport(path){
+  const secret = localStorage.getItem("VENTI_ADMIN_SECRET") || "";
+  const sep = path.includes("?") ? "&" : "?";
+  window.open(path + sep + "secret=" + encodeURIComponent(secret), "_blank");
+}
+
 function setSecret(){
   const s = prompt("Enter ADMIN_SECRET");
   if(s){ localStorage.setItem("VENTI_ADMIN_SECRET", s); loadDash(); }
