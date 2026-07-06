@@ -108,10 +108,43 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
 
     for (const item of items) {
       const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
-
-     if (entity !== "orders" && entity !== "expenses" && entity !== "payments") {
-  skipped++;
-  continue;
+// After orders save - add expenses
+if (entity === "expenses") {
+  try {
+    const data = parsePayload(item);
+    const localId = String(item.entity_id || item.local_id || data.id || "");
+    const now = new Date().toISOString();
+    const expRow = {
+      branch_id: branchId,
+      device_id: deviceId,
+      local_id: localId,
+      entity: "expenses",
+      action: item.action || "upsert",
+      status: "synced",
+      created_at: data.created_at || now
+    };
+    await supabase.from("sync_events").insert([expRow]);
+    
+    // Also save to expenses table
+    await supabase.from("expenses").upsert([{
+      local_id: localId,
+      branch_id: branchId,
+      expense_date: data.expense_date || now.slice(0,10),
+      category: data.category || "Other",
+      description: data.description || "",
+      amount: Number(data.amount || 0),
+      payment_method: data.payment_method || "Cash",
+      created_at: data.created_at || now
+    }], { onConflict: "local_id,branch_id" });
+    
+    saved++;
+    results.push({ ok: true, entity, local_id: localId });
+    continue;
+  } catch(e) {
+    failed++;
+    results.push({ ok: false, entity, error: e.message });
+    continue;
+  }
 }
       try {
         const data = parsePayload(item);
@@ -356,9 +389,43 @@ loadDash();
 </html>`);
 });
 
-if (entity !== "orders" && entity !== "expenses" && entity !== "payments") {
-  skipped++;
-  continue;
+// After orders save - add expenses
+if (entity === "expenses") {
+  try {
+    const data = parsePayload(item);
+    const localId = String(item.entity_id || item.local_id || data.id || "");
+    const now = new Date().toISOString();
+    const expRow = {
+      branch_id: branchId,
+      device_id: deviceId,
+      local_id: localId,
+      entity: "expenses",
+      action: item.action || "upsert",
+      status: "synced",
+      created_at: data.created_at || now
+    };
+    await supabase.from("sync_events").insert([expRow]);
+    
+    // Also save to expenses table
+    await supabase.from("expenses").upsert([{
+      local_id: localId,
+      branch_id: branchId,
+      expense_date: data.expense_date || now.slice(0,10),
+      category: data.category || "Other",
+      description: data.description || "",
+      amount: Number(data.amount || 0),
+      payment_method: data.payment_method || "Cash",
+      created_at: data.created_at || now
+    }], { onConflict: "local_id,branch_id" });
+    
+    saved++;
+    results.push({ ok: true, entity, local_id: localId });
+    continue;
+  } catch(e) {
+    failed++;
+    results.push({ ok: false, entity, error: e.message });
+    continue;
+  }
 }
 
 app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
