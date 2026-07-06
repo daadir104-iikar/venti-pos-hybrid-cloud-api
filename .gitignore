@@ -1,3 +1,17 @@
-.env
-node_modules
-*.log
+﻿.env
+.env.*
+node_modules/
+npm-debug.log*
+.DS_Store
+
+# local patch / inspect scripts
+fix-*.js
+patch-*.js
+inspect_*.js
+payment-test.json
+
+# backups
+server.before-*.js
+package.before-*.json
+*.bak
+*.backup
