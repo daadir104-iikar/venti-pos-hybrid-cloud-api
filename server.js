@@ -146,6 +146,45 @@ if (entity === "expenses") {
     continue;
   }
 }
+      if (entity === "order_items" || entity === "order_item" || entity === "items") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
+          const now = new Date().toISOString();
+
+          const qty = safeNumber(data.quantity ?? data.qty, 1);
+          const unitPrice = safeNumber(data.unit_price ?? data.price, 0);
+          const lineTotal = safeNumber(data.total ?? data.line_total ?? data.amount, qty * unitPrice);
+
+          const row = {
+            branch_id: branchId,
+            local_id: localId,
+            local_order_id: String(data.local_order_id || data.order_local_id || data.order_id || data.order_no || ""),
+            item_name: String(data.item_name || data.name || data.product_name || data.menu_name || "Unknown Item"),
+            menu_item_local_id: data.menu_item_local_id || data.menu_id || data.product_id || null,
+            quantity: qty,
+            unit_price: unitPrice,
+            total: lineTotal,
+            notes: data.notes || data.note || "",
+            created_at: data.created_at || now
+          };
+
+          const { error } = await supabase
+            .from("order_items")
+            .upsert([row], { onConflict: "branch_id,local_id" });
+
+          if (error) throw error;
+
+          saved++;
+          results.push({ ok: true, entity: "order_items", local_id: localId });
+          continue;
+        } catch (e) {
+          failed++;
+          results.push({ ok: false, entity: "order_items", error: e.message || String(e) });
+          continue;
+        }
+      }
+
       try {
         const data = parsePayload(item);
         const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
