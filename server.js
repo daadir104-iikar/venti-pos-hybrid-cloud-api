@@ -272,7 +272,7 @@ app.get("/admin/panel", (req, res) => {
     .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
     h1{margin:0;font-size:28px}.muted{color:#94a3b8}
     .card{background:#111827;border:1px solid #334155;border-radius:16px;padding:18px}
-    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}
+    .grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-top:18px}
     .metric .label{color:#94a3b8;font-size:13px}.metric .value{font-size:30px;font-weight:800;margin-top:8px}
     .section{margin-top:18px} table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{padding:11px;border-bottom:1px solid #334155;text-align:left;font-size:14px}
@@ -612,4 +612,5 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
