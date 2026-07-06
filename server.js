@@ -423,6 +423,14 @@ app.get("/admin/panel", (req, res) => {
         <tbody id="bestItemsBody"></tbody>
       </table>
     </div>
+
+    <div class="section card">
+      <h2>Payment Methods Today</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Payments</th><th>Total</th></tr></thead>
+        <tbody id="paymentMethodsBody"></tbody>
+      </table>
+    </div>
   </div>
 
 <script>
@@ -488,6 +496,14 @@ async function loadDash(){
         "</td><td>" + esc(money(x.revenue || 0)) +
         "</td></tr>";
     }).join("") : "<tr><td colspan=\"3\" class=\"muted\">No item sales yet</td></tr>";
+
+    const paymentMethods = j.payment_methods_today || [];
+    document.getElementById("paymentMethodsBody").innerHTML = paymentMethods.length ? paymentMethods.map(function(x){
+      return "<tr><td>" + esc(x.method || "Unknown") +
+        "</td><td>" + esc(Number(x.count || 0).toFixed(0)) +
+        "</td><td>" + esc(money(x.amount || 0)) +
+        "</td></tr>";
+    }).join("") : "<tr><td colspan=\"3\" class=\"muted\">No payments today</td></tr>";
 
     status.textContent = "Connected. Last refresh: " + new Date().toLocaleString();
     status.className = "section good";
@@ -735,6 +751,23 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
       .slice(0, 10);
 
+    const todayPayments = recentPayments.filter(p => {
+      const t = rowTimeMs(p);
+      return t >= dayStartMs && t < dayEndMs;
+    });
+
+    const paymentMap = new Map();
+    for (const p of todayPayments) {
+      const method = String(p.method || p.payment_method || p.payment_type || "Unknown").trim() || "Unknown";
+      const amount = Number(p.amount || p.total || p.paid_amount || 0);
+      const prev = paymentMap.get(method) || { method, count: 0, amount: 0 };
+      prev.count += 1;
+      prev.amount += Number.isFinite(amount) ? amount : 0;
+      paymentMap.set(method, prev);
+    }
+
+    const paymentMethodsToday = Array.from(paymentMap.values())
+      .sort((a, b) => b.amount - a.amount || b.count - a.count);
     res.json({
       ok: true,
       summary: {
@@ -747,6 +780,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       recent_orders: recentOrders,
       recent_expenses: recentExpenses,
       best_selling_items: bestSellingItems,
+      payment_methods_today: paymentMethodsToday,
       time: new Date().toISOString()
     });
   } catch (error) {
