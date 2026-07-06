@@ -268,7 +268,7 @@ if (entity === "expenses") {
         put(row, "order_date", data.order_date || data.created_at || now);
         put(row, "created_at", data.created_at || now);
 
-        const { error } = await supabase.from("orders").insert(row);
+        const { error } = await supabase.from("orders").upsert([row], { onConflict: "branch_id,device_id,local_id" });
         if (error) throw error;
 
         saved++;
@@ -791,6 +791,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
 
 
