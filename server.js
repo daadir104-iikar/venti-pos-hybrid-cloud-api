@@ -390,21 +390,31 @@ loadDash();
 });
 
 // After orders save - add expenses
+// EXPENSES HANDLER
 if (entity === "expenses") {
   try {
     const data = parsePayload(item);
     const localId = String(item.entity_id || item.local_id || data.id || "");
     const now = new Date().toISOString();
-    const expRow = {
-      branch_id: branchId,
-      device_id: deviceId,
+    await supabase.from("expenses").upsert([{
       local_id: localId,
-      entity: "expenses",
-      action: item.action || "upsert",
-      status: "synced",
+      branch_id: branchId,
+      expense_date: data.expense_date || now.slice(0,10),
+      category: data.category || "Other",
+      description: data.description || "",
+      amount: Number(data.amount || 0),
+      payment_method: data.payment_method || "Cash",
       created_at: data.created_at || now
-    };
-    await supabase.from("sync_events").insert([expRow]);
+    }], { onConflict: "local_id,branch_id" });
+    saved++;
+    results.push({ ok: true, entity, local_id: localId });
+    continue;
+  } catch(e) {
+    failed++;
+    results.push({ ok: false, entity, error: e.message });
+    continue;
+  }
+}
     
     // Also save to expenses table
     await supabase.from("expenses").upsert([{
