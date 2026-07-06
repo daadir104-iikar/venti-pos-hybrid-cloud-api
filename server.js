@@ -478,7 +478,7 @@ async function loadDash(){
         "</td><td>" + esc(pick(o, ["display_status","status","order_status"], "")) +
         "</td><td>" + esc(money(pick(o, ["display_total","total","total_amount","grand_total","net_total","amount"], 0))) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
+    }).join("") : "<tr><td colspan=\"4\" class=\"muted\">No recent orders</td></tr>";
 
     const expenses = j.recent_expenses || [];
     document.getElementById("expensesBody").innerHTML = expenses.length ? expenses.map(function(e){
@@ -791,6 +791,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
 
 
