@@ -146,6 +146,56 @@ if (entity === "expenses") {
     continue;
   }
 }
+      if (entity === "payments" || entity === "payment") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
+          const now = new Date().toISOString();
+
+          const amount = Number(data.amount || data.total || data.paid_amount || data.paid || 0);
+          const method = String(data.method || data.payment_method || data.payment_type || data.type || "Cash");
+          const localOrderId = String(data.local_order_id || data.order_local_id || data.order_id || data.order_no || "");
+
+          const row = {
+            branch_id: branchId,
+            local_id: localId,
+            local_order_id: localOrderId,
+            method,
+            amount,
+            created_at: data.created_at || data.payment_date || data.date || now
+          };
+
+          await supabase
+            .from("payments")
+            .delete()
+            .eq("branch_id", branchId)
+            .eq("local_id", localId);
+
+          const { error } = await supabase
+            .from("payments")
+            .insert([row]);
+
+          if (error) throw error;
+
+          await supabase.from("sync_events").insert([{
+            branch_id: branchId,
+            device_id: deviceId,
+            entity: "payments",
+            local_id: localId,
+            action: item.action || "upsert",
+            status: "synced",
+            created_at: data.created_at || now
+          }]);
+
+          saved++;
+          results.push({ ok: true, entity: "payments", local_id: localId });
+          continue;
+        } catch (e) {
+          failed++;
+          results.push({ ok: false, entity: "payments", error: e.message || String(e) });
+          continue;
+        }
+      }
       if (entity === "order_items" || entity === "order_item" || entity === "items") {
         try {
           const data = parsePayload(item);
@@ -707,6 +757,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
 
 
