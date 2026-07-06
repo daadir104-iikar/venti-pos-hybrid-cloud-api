@@ -478,7 +478,7 @@ async function loadDash(){
         "</td><td>" + esc(pick(o, ["display_status","status","order_status"], "")) +
         "</td><td>" + esc(money(pick(o, ["display_total","total","total_amount","grand_total","net_total","amount"], 0))) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\"4\" class=\"muted\">No recent orders</td></tr>";
+    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent orders</td></tr>";
 
     const expenses = j.recent_expenses || [];
     document.getElementById("expensesBody").innerHTML = expenses.length ? expenses.map(function(e){
@@ -487,7 +487,7 @@ async function loadDash(){
         "</td><td>" + esc(pick(e, ["note","description","title"], "")) +
         "</td><td>" + esc(money(pick(e, ["amount","total"], 0))) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\"4\" class=\"muted\">No recent expenses</td></tr>";
+    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent expenses</td></tr>";
 
     const bestItems = j.best_selling_items || [];
     document.getElementById("bestItemsBody").innerHTML = bestItems.length ? bestItems.map(function(x){
@@ -495,7 +495,7 @@ async function loadDash(){
         "</td><td>" + esc(Number(x.quantity || 0).toFixed(0)) +
         "</td><td>" + esc(money(x.revenue || 0)) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\"3\" class=\"muted\">No item sales yet</td></tr>";
+    }).join("") : "<tr><td colspan=\\"3\\" class=\\"muted\\">No item sales yet</td></tr>";
 
     const paymentMethods = j.payment_methods_today || [];
     document.getElementById("paymentMethodsBody").innerHTML = paymentMethods.length ? paymentMethods.map(function(x){
@@ -503,7 +503,7 @@ async function loadDash(){
         "</td><td>" + esc(Number(x.count || 0).toFixed(0)) +
         "</td><td>" + esc(money(x.amount || 0)) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\"3\" class=\"muted\">No payments today</td></tr>";
+    }).join("") : "<tr><td colspan=\\"3\\" class=\\"muted\\">No payments today</td></tr>";
 
     status.textContent = "Connected. Last refresh: " + new Date().toLocaleString();
     status.className = "section good";
@@ -791,6 +791,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
 
 
