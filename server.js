@@ -346,6 +346,7 @@ app.get("/admin/panel", (req, res) => {
       <div class="card metric"><div class="label">Today Sales</div><div id="todaySales" class="value">$0.00</div></div>
       <div class="card metric"><div class="label">Today Orders</div><div id="todayOrders" class="value">0</div></div>
       <div class="card metric"><div class="label">Today Expenses</div><div id="todayExpenses" class="value">$0.00</div></div>
+      <div class="card metric"><div class="label">Today Profit</div><div id="todayProfit" class="value">$0.00</div></div>
       <div class="card metric"><div class="label">Synced Events</div><div id="customers" class="value">0</div></div>
     </div>
 
@@ -362,6 +363,14 @@ app.get("/admin/panel", (req, res) => {
       <table>
         <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th></tr></thead>
         <tbody id="expensesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section card">
+      <h2>Best Selling Items</h2>
+      <table>
+        <thead><tr><th>Item</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+        <tbody id="bestItemsBody"></tbody>
       </table>
     </div>
   </div>
@@ -401,6 +410,7 @@ async function loadDash(){
     document.getElementById("todaySales").textContent = money(j.summary.today_sales);
     document.getElementById("todayOrders").textContent = j.summary.today_orders;
     document.getElementById("todayExpenses").textContent = money(j.summary.today_expenses);
+    document.getElementById("todayProfit").textContent = money(j.summary.today_profit);
     document.getElementById("customers").textContent = j.summary.synced_events;
 
     const orders = j.recent_orders || [];
@@ -419,7 +429,15 @@ async function loadDash(){
         "</td><td>" + esc(pick(e, ["note","description","title"], "")) +
         "</td><td>" + esc(money(pick(e, ["amount","total"], 0))) +
         "</td></tr>";
-    }).join("") : "<tr><td colspan=\\"4\\" class=\\"muted\\">No recent expenses</td></tr>";
+    }).join("") : "<tr><td colspan=\"4\" class=\"muted\">No recent expenses</td></tr>";
+
+    const bestItems = j.best_selling_items || [];
+    document.getElementById("bestItemsBody").innerHTML = bestItems.length ? bestItems.map(function(x){
+      return "<tr><td>" + esc(x.item_name || "") +
+        "</td><td>" + esc(Number(x.quantity || 0).toFixed(0)) +
+        "</td><td>" + esc(money(x.revenue || 0)) +
+        "</td></tr>";
+    }).join("") : "<tr><td colspan=\"3\" class=\"muted\">No item sales yet</td></tr>";
 
     status.textContent = "Connected. Last refresh: " + new Date().toLocaleString();
     status.className = "section good";
@@ -474,6 +492,12 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
     let recentPayments = await safe(async () => {
       const { data, error } = await supabase.from("payments").select("*").order("created_at", { ascending: false }).limit(500);
+      if (error) return [];
+      return data || [];
+    }, []);
+
+    let recentOrderItems = await safe(async () => {
+      const { data, error } = await supabase.from("order_items").select("*").order("created_at", { ascending: false }).limit(1000);
       if (error) return [];
       return data || [];
     }, []);
@@ -637,16 +661,42 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       return t >= dayStartMs && t < dayEndMs;
     });
 
+    const todaySalesTotal = todayOrders.reduce((sum, o) => sum + amountOf(o), 0);
+    const todayExpensesTotal = todayExpensesRows.reduce((sum, e) => sum + amountOf(e), 0);
+    const todayProfit = todaySalesTotal - todayExpensesTotal;
+
+    const todayOrderItems = recentOrderItems.filter(x => {
+      const t = rowTimeMs(x);
+      return t >= dayStartMs && t < dayEndMs;
+    });
+
+    const bestMap = new Map();
+    for (const x of todayOrderItems) {
+      const name = String(x.item_name || x.name || "Unknown Item").trim() || "Unknown Item";
+      const qty = Number(x.quantity || x.qty || 0);
+      const revenue = Number(x.total || x.amount || 0);
+      const prev = bestMap.get(name) || { item_name: name, quantity: 0, revenue: 0 };
+      prev.quantity += Number.isFinite(qty) ? qty : 0;
+      prev.revenue += Number.isFinite(revenue) ? revenue : 0;
+      bestMap.set(name, prev);
+    }
+
+    const bestSellingItems = Array.from(bestMap.values())
+      .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
+      .slice(0, 10);
+
     res.json({
       ok: true,
       summary: {
-        today_sales: todayOrders.reduce((s, o) => s + amountOf(o), 0),
+        today_sales: todaySalesTotal,
         today_orders: todayOrders.length,
-        today_expenses: todayExpensesRows.reduce((s, e) => s + amountOf(e), 0),
+        today_expenses: todayExpensesTotal,
+        today_profit: todayProfit,
         synced_events: syncRows.length
       },
       recent_orders: recentOrders,
       recent_expenses: recentExpenses,
+      best_selling_items: bestSellingItems,
       time: new Date().toISOString()
     });
   } catch (error) {
@@ -657,6 +707,7 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
 
 
 
