@@ -109,11 +109,10 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
     for (const item of items) {
       const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
 
-      if (entity !== "orders") {
-        skipped++;
-        continue;
-      }
-
+     if (entity !== "orders" && entity !== "expenses" && entity !== "payments") {
+  skipped++;
+  continue;
+}
       try {
         const data = parsePayload(item);
         const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
