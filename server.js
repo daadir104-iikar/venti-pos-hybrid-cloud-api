@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -389,55 +389,6 @@ loadDash();
 </html>`);
 });
 
-// After orders save - add expenses
-// EXPENSES HANDLER
-if (entity === "expenses") {
-  try {
-    const data = parsePayload(item);
-    const localId = String(item.entity_id || item.local_id || data.id || "");
-    const now = new Date().toISOString();
-    await supabase.from("expenses").upsert([{
-      local_id: localId,
-      branch_id: branchId,
-      expense_date: data.expense_date || now.slice(0,10),
-      category: data.category || "Other",
-      description: data.description || "",
-      amount: Number(data.amount || 0),
-      payment_method: data.payment_method || "Cash",
-      created_at: data.created_at || now
-    }], { onConflict: "local_id,branch_id" });
-    saved++;
-    results.push({ ok: true, entity, local_id: localId });
-    continue;
-  } catch(e) {
-    failed++;
-    results.push({ ok: false, entity, error: e.message });
-    continue;
-  }
-}
-    
-    // Also save to expenses table
-    await supabase.from("expenses").upsert([{
-      local_id: localId,
-      branch_id: branchId,
-      expense_date: data.expense_date || now.slice(0,10),
-      category: data.category || "Other",
-      description: data.description || "",
-      amount: Number(data.amount || 0),
-      payment_method: data.payment_method || "Cash",
-      created_at: data.created_at || now
-    }], { onConflict: "local_id,branch_id" });
-    
-    saved++;
-    results.push({ ok: true, entity, local_id: localId });
-    continue;
-  } catch(e) {
-    failed++;
-    results.push({ ok: false, entity, error: e.message });
-    continue;
-  }
-}
-
 app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
   try {
     const safe = async (fn, fallback) => {
@@ -661,3 +612,4 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
 
 
 app.listen(PORT, () => console.log("Venti POS Cloud API running on http://localhost:" + PORT));
+
