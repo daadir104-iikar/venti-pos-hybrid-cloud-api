@@ -704,7 +704,16 @@ app.get("/admin/panel", (req, res) => {
         <h1>Venti POS Cloud Admin</h1>
         <div class="muted">Remote dashboard for synced POS data</div>
       </div>
-      <div>
+      
+      <div style="display:flex;gap:8px;align-items:center;margin:10px 0;">
+        <label style="font-weight:600;">Language</label>
+        <select id="langSelect" onchange="setLang(this.value)" style="padding:8px;border-radius:8px;">
+          <option value="en">English</option>
+          <option value="so">Somali</option>
+        </select>
+      </div>
+
+<div>
         <button onclick="setSecret()">Admin Login</button>
         <button onclick="loadDash()">Refresh</button>
       </div>
@@ -774,6 +783,76 @@ function getSecret(){
   if(!s){ s = prompt("Enter ADMIN_SECRET"); if(s) localStorage.setItem("VENTI_ADMIN_SECRET", s); }
   return s || "";
 }
+
+
+const I18N_SO = {
+  "Venti POS Cloud Admin": "Venti POS Cloud Admin",
+  "Remote dashboard for synced POS data": "Dashboard fog oo xogta POS sync-gareysan lagu arko",
+  "Admin Login": "Admin Login",
+  "Refresh": "Cusboonaysii",
+  "Language": "Luqad",
+  "Connected": "Ku xiran",
+  "Today Sales": "Iibka Maanta",
+  "Today Orders": "Dalabyada Maanta",
+  "Today Expenses": "Kharashaadka Maanta",
+  "Today Profit": "Faa’iidada Maanta",
+  "Synced Events": "Sync Events",
+  "Reports": "Warbixinno",
+  "PDF buttons open a print page. Choose Print → Save as PDF.": "PDF buttons waxay furaan bog print ah. Dooro Print → Save as PDF.",
+  "Daily Sales PDF": "Iibka Maanta PDF",
+  "Expenses PDF": "Kharashaadka PDF",
+  "Profit PDF": "Faa’iido PDF",
+  "Daily Sales CSV": "Iibka Maanta CSV",
+  "Expenses CSV": "Kharashaadka CSV",
+  "Profit CSV": "Faa’iido CSV",
+  "Recent Orders": "Dalabyadii Ugu Dambeeyay",
+  "Recent Expenses": "Kharashaadkii Ugu Dambeeyay",
+  "Best Selling Items": "Alaabta Ugu Iibka Badan",
+  "Payment Methods Today": "Hababka Lacag-bixinta Maanta",
+  "Date": "Taariikh",
+  "Receipt/ID": "Rasiid/ID",
+  "Status": "Status",
+  "Total": "Wadar",
+  "Category": "Qayb",
+  "Note": "Faahfaahin",
+  "Amount": "Qiime",
+  "Item": "Shay",
+  "Qty Sold": "Tiro la iibiyay",
+  "Revenue": "Dakhli",
+  "Method": "Hab",
+  "Payments": "Lacag-bixinno",
+  "No recent orders": "Dalab cusub ma jiro",
+  "No recent expenses": "Kharash cusub ma jiro",
+  "No item sales yet": "Alaab iib wali ma jirto",
+  "No payments today": "Lacag-bixin maanta ma jirto"
+};
+
+function applyLang(){
+  const lang = localStorage.getItem("VENTI_ADMIN_LANG") || "en";
+  const sel = document.getElementById("langSelect");
+  if(sel) sel.value = lang;
+
+  const all = document.querySelectorAll("h1,h2,p,span,strong,th,button,label,option,td");
+  all.forEach(el => {
+    if(!el.dataset.enText){
+      const txt = (el.textContent || "").trim();
+      if(txt) el.dataset.enText = txt;
+    }
+    const en = el.dataset.enText || "";
+    if(lang === "so" && I18N_SO[en]){
+      el.textContent = I18N_SO[en];
+    } else if(lang === "en" && en){
+      el.textContent = en;
+    }
+  });
+}
+
+function setLang(lang){
+  localStorage.setItem("VENTI_ADMIN_LANG", lang || "en");
+  applyLang();
+}
+
+setTimeout(applyLang, 200);
 
 function openReport(path){
   const secret = localStorage.getItem("VENTI_ADMIN_SECRET") || "";
