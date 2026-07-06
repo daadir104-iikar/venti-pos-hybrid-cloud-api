@@ -357,6 +357,11 @@ loadDash();
 </html>`);
 });
 
+if (entity !== "orders" && entity !== "expenses" && entity !== "payments") {
+  skipped++;
+  continue;
+}
+
 app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
   try {
     const safe = async (fn, fallback) => {
