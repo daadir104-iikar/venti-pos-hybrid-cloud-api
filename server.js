@@ -398,6 +398,17 @@ function sendReportCsv(res, filename, headers, rows) {
   res.send(lines.join("\r\n"));
 }
 
+
+function reportBranchId(req) {
+  const v = String((req.query && (req.query.branch_id || req.query.branch)) || "").trim();
+  return v;
+}
+
+function reportBranchMatches(row, branchId) {
+  if (!branchId) return true;
+  return String(row && row.branch_id || "").trim() === branchId;
+}
+
 function reportRange(req) {
   const offsetMin = Number(process.env.VENTI_TZ_OFFSET_MIN || 180);
   const dateText = String(req.query.date || "").slice(0, 10);
@@ -435,7 +446,7 @@ function reportRowTimeMs(row, keys) {
   return 0;
 }
 
-async function getReportOrders(range) {
+async function getReportOrders(range, branchId = "") {
   const { data, error } = await supabase
     .from("orders")
     .select("*")
@@ -446,11 +457,11 @@ async function getReportOrders(range) {
 
   return (data || []).filter(row => {
     const t = reportRowTimeMs(row, ["order_date", "created_at"]);
-    return t >= range.startMs && t < range.endMs;
+    return t >= range.startMs && t < range.endMs && reportBranchMatches(row, branchId);
   });
 }
 
-async function getReportExpenses(range) {
+async function getReportExpenses(range, branchId = "") {
   const { data, error } = await supabase
     .from("expenses")
     .select("*")
@@ -461,7 +472,7 @@ async function getReportExpenses(range) {
 
   return (data || []).filter(row => {
     const t = reportRowTimeMs(row, ["created_at", "expense_date", "date"]);
-    return t >= range.startMs && t < range.endMs;
+    return t >= range.startMs && t < range.endMs && reportBranchMatches(row, branchId);
   });
 }
 
@@ -489,7 +500,8 @@ app.get("/admin/report/daily-sales.csv", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const orders = await getReportOrders(range);
+    const branchId = reportBranchId(req);
+    const orders = await getReportOrders(range, branchId);
 
     const rows = orders.map(o => ({
       date: o.order_date || o.created_at || "",
@@ -521,7 +533,8 @@ app.get("/admin/report/expenses.csv", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const expenses = await getReportExpenses(range);
+    const branchId = reportBranchId(req);
+    const expenses = await getReportExpenses(range, branchId);
 
     const rows = expenses.map(x => ({
       date: x.created_at || x.expense_date || "",
@@ -549,8 +562,9 @@ app.get("/admin/report/profit.csv", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const orders = await getReportOrders(range);
-    const expenses = await getReportExpenses(range);
+    const branchId = reportBranchId(req);
+    const orders = await getReportOrders(range, branchId);
+    const expenses = await getReportExpenses(range, branchId);
 
     const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
     const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
@@ -577,7 +591,8 @@ app.get("/admin/report/daily-sales/print", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const orders = await getReportOrders(range);
+    const branchId = reportBranchId(req);
+    const orders = await getReportOrders(range, branchId);
     const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
     const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
 
@@ -610,7 +625,8 @@ app.get("/admin/report/expenses/print", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const expenses = await getReportExpenses(range);
+    const branchId = reportBranchId(req);
+    const expenses = await getReportExpenses(range, branchId);
     const total = expenses.reduce((s, x) => s + Number(x.amount || 0), 0);
 
     const summary = '<div class="summary">' +
@@ -642,8 +658,9 @@ app.get("/admin/report/profit/print", async (req, res) => {
   try {
     if (!requireReportAdmin(req, res)) return;
     const range = reportRange(req);
-    const orders = await getReportOrders(range);
-    const expenses = await getReportExpenses(range);
+    const branchId = reportBranchId(req);
+    const orders = await getReportOrders(range, branchId);
+    const expenses = await getReportExpenses(range, branchId);
 
     const sales = orders.reduce((s, o) => s + Number(o.total || 0), 0);
     const paid = orders.reduce((s, o) => s + Number(o.paid || 0), 0);
@@ -731,7 +748,19 @@ app.get("/admin/panel", (req, res) => {
 
     <div class="section card">
       
-            <section class="panel reports-phase1">
+            
+            <section class="panel branch-filter-phase3">
+              <h2>Branch Filter</h2>
+              <p class="muted">Optional: enter a branch_id to view reports for one branch only. Leave blank for all branches.</p>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">
+                <input id="branchFilterInput" placeholder="Branch ID e.g. branch-main" style="padding:10px;border-radius:8px;min-width:260px;" />
+                <button onclick="saveBranchFilter()">Apply Branch</button>
+                <button onclick="clearBranchFilter()">All Branches</button>
+              </div>
+              <p class="muted">Current Branch: <strong id="currentBranchText">All Branches</strong></p>
+            </section>
+
+<section class="panel reports-phase1">
               <h2>Reports</h2>
               <p class="muted">PDF buttons open a print page. Choose Print → Save as PDF.</p>
               <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">
@@ -798,6 +827,11 @@ const I18N_SO = {
   "Today Profit": "Faa’iidada Maanta",
   "Synced Events": "Sync Events",
   "Reports": "Warbixinno",
+  "Branch Filter": "Branch Filter",
+  "Optional: enter a branch_id to view reports for one branch only. Leave blank for all branches.": "Ikhtiyaari: geli branch_id si aad u aragto warbixinta branch keliya. Haddii madhan yahay, dhammaan branches ayaa muuqanaya.",
+  "Apply Branch": "Dooro Branch",
+  "All Branches": "Dhammaan Branches",
+  "Current Branch:": "Branch Hadda:",
   "PDF buttons open a print page. Choose Print → Save as PDF.": "PDF buttons waxay furaan bog print ah. Dooro Print → Save as PDF.",
   "Daily Sales PDF": "Iibka Maanta PDF",
   "Expenses PDF": "Kharashaadka PDF",
@@ -854,10 +888,43 @@ function setLang(lang){
 
 setTimeout(applyLang, 200);
 
+
+function currentBranchFilter(){
+  return localStorage.getItem("VENTI_ADMIN_BRANCH_ID") || "";
+}
+
+function applyBranchFilterUi(){
+  const v = currentBranchFilter();
+  const input = document.getElementById("branchFilterInput");
+  const text = document.getElementById("currentBranchText");
+  if(input) input.value = v;
+  if(text) text.textContent = v || "All Branches";
+}
+
+function saveBranchFilter(){
+  const input = document.getElementById("branchFilterInput");
+  const v = input ? String(input.value || "").trim() : "";
+  localStorage.setItem("VENTI_ADMIN_BRANCH_ID", v);
+  applyBranchFilterUi();
+  if(typeof loadDash === "function") loadDash();
+}
+
+function clearBranchFilter(){
+  localStorage.removeItem("VENTI_ADMIN_BRANCH_ID");
+  applyBranchFilterUi();
+  if(typeof loadDash === "function") loadDash();
+}
+
+setTimeout(applyBranchFilterUi, 200);
+
 function openReport(path){
   const secret = localStorage.getItem("VENTI_ADMIN_SECRET") || "";
+  const branch = currentBranchFilter();
+  const params = [];
+  params.push("secret=" + encodeURIComponent(secret));
+  if(branch) params.push("branch_id=" + encodeURIComponent(branch));
   const sep = path.includes("?") ? "&" : "?";
-  window.open(path + sep + "secret=" + encodeURIComponent(secret), "_blank");
+  window.open(path + sep + params.join("&"), "_blank");
 }
 
 function setSecret(){
