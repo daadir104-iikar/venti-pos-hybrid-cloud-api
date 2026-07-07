@@ -690,6 +690,81 @@ app.get("/admin/report/profit/print", async (req, res) => {
 
 // END ADMIN REPORTS PHASE 1
 
+
+
+// ADMIN DEVICE MANAGER PHASE 3C
+app.get("/admin/devices", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+
+    const { data, error } = await supabase
+      .from("devices")
+      .select("id,branch_id,device_code,device_name,device_type,is_active,created_at")
+      .order("device_code", { ascending: true })
+      .limit(500);
+
+    if (error) throw error;
+
+    res.json({ ok: true, devices: data || [] });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+app.post("/admin/devices/update", async (req, res) => {
+  try {
+    if (!requireReportAdmin(req, res)) return;
+
+    const body = req.body || {};
+    const id = String(body.id || "").trim();
+    const deviceCode = String(body.device_code || "").trim();
+
+    if (!id && !deviceCode) {
+      return res.status(400).json({ ok: false, error: "Missing device id or device_code" });
+    }
+
+    const patch = {};
+
+    if (Object.prototype.hasOwnProperty.call(body, "branch_id")) {
+      patch.branch_id = String(body.branch_id || "").trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "device_name")) {
+      patch.device_name = String(body.device_name || "").trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "device_type")) {
+      patch.device_type = String(body.device_type || "").trim() || "pos";
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "is_active")) {
+      patch.is_active = !!body.is_active;
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ ok: false, error: "Nothing to update" });
+    }
+
+    let q = supabase.from("devices").update(patch).select("id,branch_id,device_code,device_name,device_type,is_active");
+
+    if (id) {
+      q = q.eq("id", id);
+    } else {
+      q = q.eq("device_code", deviceCode);
+    }
+
+    const { data, error } = await q;
+
+    if (error) throw error;
+
+    res.json({ ok: true, updated: data || [] });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+// END ADMIN DEVICE MANAGER PHASE 3C
+
 app.get("/admin/panel", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!doctype html>
@@ -749,7 +824,35 @@ app.get("/admin/panel", (req, res) => {
     <div class="section card">
       
             
-            <section class="panel branch-filter-phase3">
+            
+            <section class="panel device-manager-phase3c">
+              <h2>Device Manager</h2>
+              <p class="muted">Assign cashier devices to the correct branch. Cloud sync uses each device API key and branch_id.</p>
+
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">
+                <button onclick="loadDevices()">Refresh Devices</button>
+              </div>
+
+              <div style="overflow:auto;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Device Code</th>
+                      <th>Device Name</th>
+                      <th>Branch ID</th>
+                      <th>Type</th>
+                      <th>Active</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="devicesBody">
+                    <tr><td colspan="6">Click Refresh Devices</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+<section class="panel branch-filter-phase3">
               <h2>Branch Filter</h2>
               <p class="muted">Optional: enter a branch_id to view reports for one branch only. Leave blank for all branches.</p>
               <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;">
@@ -827,6 +930,16 @@ const I18N_SO = {
   "Today Profit": "Faa’iidada Maanta",
   "Synced Events": "Sync Events",
   "Reports": "Warbixinno",
+  "Device Manager": "Device Manager",
+  "Assign cashier devices to the correct branch. Cloud sync uses each device API key and branch_id.": "Ku xir cashier devices branch-ka saxda ah. Cloud sync wuxuu isticmaalaa device API key iyo branch_id.",
+  "Refresh Devices": "Cusboonaysii Devices",
+  "Device Code": "Device Code",
+  "Device Name": "Magaca Device-ka",
+  "Branch ID": "Branch ID",
+  "Type": "Nooc",
+  "Active": "Active",
+  "Action": "Action",
+  "Click Refresh Devices": "Guji Refresh Devices",
   "Branch Filter": "Branch Filter",
   "Optional: enter a branch_id to view reports for one branch only. Leave blank for all branches.": "Ikhtiyaari: geli branch_id si aad u aragto warbixinta branch keliya. Haddii madhan yahay, dhammaan branches ayaa muuqanaya.",
   "Apply Branch": "Dooro Branch",
@@ -888,6 +1001,78 @@ function setLang(lang){
 
 setTimeout(applyLang, 200);
 
+
+
+async function loadDevices(){
+  const secret = localStorage.getItem("VENTI_ADMIN_SECRET") || "";
+  const body = document.getElementById("devicesBody");
+  if(body) body.innerHTML = '<tr><td colspan="6">Loading devices...</td></tr>';
+
+  try {
+    const res = await fetch("/admin/devices", {
+      headers: { "x-admin-secret": secret }
+    });
+
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Failed to load devices");
+
+    const devices = data.devices || [];
+
+    if(!devices.length){
+      if(body) body.innerHTML = '<tr><td colspan="6">No devices found</td></tr>';
+      return;
+    }
+
+    if(body){
+      body.innerHTML = devices.map((d, i) => {
+        const safeId = String(d.id || "");
+        const code = String(d.device_code || "");
+        const name = String(d.device_name || "");
+        const branch = String(d.branch_id || "");
+        const type = String(d.device_type || "pos");
+        const active = !!d.is_active;
+
+        return '<tr>' +
+          '<td><strong>' + esc(code) + '</strong><input id="dev_id_' + i + '" type="hidden" value="' + esc(safeId) + '"></td>' +
+          '<td><input id="dev_name_' + i + '" value="' + esc(name) + '" style="padding:8px;border-radius:8px;min-width:180px;"></td>' +
+          '<td><input id="dev_branch_' + i + '" value="' + esc(branch) + '" placeholder="branch-main" style="padding:8px;border-radius:8px;min-width:180px;"></td>' +
+          '<td><input id="dev_type_' + i + '" value="' + esc(type) + '" style="padding:8px;border-radius:8px;max-width:90px;"></td>' +
+          '<td><select id="dev_active_' + i + '" style="padding:8px;border-radius:8px;"><option value="true"' + (active ? " selected" : "") + '>Active</option><option value="false"' + (!active ? " selected" : "") + '>Inactive</option></select></td>' +
+          '<td><button onclick="saveDeviceRow(' + i + ')">Save</button></td>' +
+          '</tr>';
+      }).join("");
+    }
+  } catch(e) {
+    if(body) body.innerHTML = '<tr><td colspan="6">Error: ' + esc(e.message || String(e)) + '</td></tr>';
+  }
+}
+
+async function saveDeviceRow(i){
+  const secret = localStorage.getItem("VENTI_ADMIN_SECRET") || "";
+  const id = document.getElementById("dev_id_" + i)?.value || "";
+  const device_name = document.getElementById("dev_name_" + i)?.value || "";
+  const branch_id = document.getElementById("dev_branch_" + i)?.value || "";
+  const device_type = document.getElementById("dev_type_" + i)?.value || "pos";
+  const is_active = (document.getElementById("dev_active_" + i)?.value || "true") === "true";
+
+  const res = await fetch("/admin/devices/update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-secret": secret
+    },
+    body: JSON.stringify({ id, device_name, branch_id, device_type, is_active })
+  });
+
+  const data = await res.json();
+  if(!data.ok){
+    alert("Device update failed: " + (data.error || "Unknown error"));
+    return;
+  }
+
+  alert("Device updated successfully");
+  loadDevices();
+}
 
 function currentBranchFilter(){
   return localStorage.getItem("VENTI_ADMIN_BRANCH_ID") || "";
