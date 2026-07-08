@@ -1087,7 +1087,7 @@ app.get("/admin/panel", (req, res) => {
       <h2>Daily Closings</h2>
       <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
         <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Cash</th><th>Total</th><th>Expenses</th><th>Expected</th><th>Counted</th><th>Diff</th></tr>
-        ${(d.recent_daily_closings||[]).slice(0,10).map(c=>`<tr>
+        ${(data.recent_daily_closings||[]).slice(0,10).map(c=>`<tr>
           <td>${c.closing_date||""}</td>
           <td>$${Number(c.cash_sales||0).toFixed(2)}</td>
           <td>$${Number(c.total_sales||0).toFixed(2)}</td>
@@ -1100,7 +1100,7 @@ app.get("/admin/panel", (req, res) => {
       <h2>Customer Credit Ledger</h2>
       <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
         <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Customer</th><th>Type</th><th>Amount</th><th>Notes</th></tr>
-        ${(d.recent_customer_ledger||[]).slice(0,10).map(c=>`<tr>
+        ${(data.recent_customer_ledger||[]).slice(0,10).map(c=>`<tr>
           <td>${c.transaction_date||""}</td>
           <td>${c.customer_name||""}</td>
           <td>${c.type||""}</td>
