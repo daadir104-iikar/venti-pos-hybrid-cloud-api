@@ -146,6 +146,63 @@ if (entity === "expenses") {
     continue;
   }
 }
+
+      if (entity === "refunds" || entity === "refund") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
+          const now = new Date().toISOString();
+
+          if (!localId) {
+            skipped++;
+            results.push({ ok: false, entity: "refunds", skipped: true, reason: "missing local_id" });
+            continue;
+          }
+
+          const row = {
+            branch_id: branchId,
+            device_id: deviceId,
+            local_id: localId,
+            local_order_id: String(data.local_order_id || data.order_local_id || data.order_id || data.order_no || ""),
+            order_id: String(data.order_id || data.local_order_id || ""),
+            amount: Number(data.amount || data.total || 0),
+            reason: data.reason || data.notes || "",
+            cashier_name: data.cashier_name || data.cashier || data.user_name || "",
+            created_at: data.created_at || data.refund_date || data.date || now
+          };
+
+          await supabase
+            .from("refunds")
+            .delete()
+            .eq("branch_id", branchId)
+            .eq("local_id", localId);
+
+          const { error } = await supabase
+            .from("refunds")
+            .insert([row]);
+
+          if (error) throw error;
+
+          await supabase.from("sync_events").insert([{
+            branch_id: branchId,
+            device_id: deviceId,
+            local_id: localId,
+            entity: "refunds",
+            action: item.action || "upsert",
+            status: "synced",
+            created_at: data.created_at || now
+          }]);
+
+          saved++;
+          results.push({ ok: true, entity: "refunds", local_id: localId });
+          continue;
+        } catch (e) {
+          failed++;
+          results.push({ ok: false, entity: "refunds", error: e.message || String(e) });
+          continue;
+        }
+      }
+
       if (entity === "payments" || entity === "payment") {
         try {
           const data = parsePayload(item);
