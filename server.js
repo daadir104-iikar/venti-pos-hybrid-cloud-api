@@ -1087,26 +1087,12 @@ app.get("/admin/panel", (req, res) => {
       <h2>Daily Closings</h2>
       <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
         <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Cash</th><th>Total</th><th>Expenses</th><th>Expected</th><th>Counted</th><th>Diff</th></tr>
-        ${(j.recent_daily_closings||[]).slice(0,10).map(c=>`<tr>
-          <td>${c.closing_date||""}</td>
-          <td>$${Number(c.cash_sales||0).toFixed(2)}</td>
-          <td>$${Number(c.total_sales||0).toFixed(2)}</td>
-          <td>$${Number(c.expenses||0).toFixed(2)}</td>
-          <td>$${Number(c.expected_cash||0).toFixed(2)}</td>
-          <td>$${Number(c.counted_cash||0).toFixed(2)}</td>
-          <td style="color:${Number(c.difference||0)<0?"red":"green"}">$${Number(c.difference||0).toFixed(2)}</td>
-        </tr>`).join("")}
+        <tbody id="dailyClosingsBody"></tbody>
       </table>
       <h2>Customer Credit Ledger</h2>
       <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
         <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Customer</th><th>Type</th><th>Amount</th><th>Notes</th></tr>
-        ${(j.recent_customer_ledger||[]).slice(0,10).map(c=>`<tr>
-          <td>${c.transaction_date||""}</td>
-          <td>${c.customer_name||""}</td>
-          <td>${c.type||""}</td>
-          <td>$${Number(c.amount||0).toFixed(2)}</td>
-          <td>${c.notes||""}</td>
-        </tr>`).join("")}
+        <tbody id="customerLedgerBody"></tbody>
       </table>
       <h2>Recent Expenses</h2>
       <table>
@@ -1368,6 +1354,34 @@ async function loadDash(){
     document.getElementById("customers").textContent = j.summary.synced_events;
 
     const orders = j.recent_orders || [];
+    
+    // Populate daily closings
+    const dailyClosings = j.recent_daily_closings || [];
+    const dcBody = document.getElementById("dailyClosingsBody");
+    if (dcBody) {
+      dcBody.innerHTML = dailyClosings.slice(0,10).map(c => `<tr>
+        <td>${c.closing_date||""}</td>
+        <td>$${Number(c.cash_sales||0).toFixed(2)}</td>
+        <td>$${Number(c.total_sales||0).toFixed(2)}</td>
+        <td>$${Number(c.expenses||0).toFixed(2)}</td>
+        <td>$${Number(c.expected_cash||0).toFixed(2)}</td>
+        <td>$${Number(c.counted_cash||0).toFixed(2)}</td>
+        <td style="color:${Number(c.difference||0)<0?'red':'green'}">$${Number(c.difference||0).toFixed(2)}</td>
+      </tr>`).join("") || "<tr><td colspan=7>No daily closings</td></tr>";
+    }
+
+    // Populate customer ledger
+    const ledger = j.recent_customer_ledger || [];
+    const clBody = document.getElementById("customerLedgerBody");
+    if (clBody) {
+      clBody.innerHTML = ledger.slice(0,10).map(c => `<tr>
+        <td>${c.transaction_date||""}</td>
+        <td>${c.customer_name||""}</td>
+        <td>${c.type||""}</td>
+        <td>$${Number(c.amount||0).toFixed(2)}</td>
+        <td>${c.notes||""}</td>
+      </tr>`).join("") || "<tr><td colspan=5>No customer ledger entries</td></tr>";
+    }
     document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
       return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
         "</td><td>" + esc(pick(o, ["display_id","order_no","local_id","receipt_no","receipt_number","id"], "")) +
