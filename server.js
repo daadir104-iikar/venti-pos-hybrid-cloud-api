@@ -108,8 +108,8 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
 
     for (const item of items) {
       const entity = String(item.entity || item.table_name || item.table || "").toLowerCase();
-// After orders save - add expenses
-if (entity === "expenses") {
+      // After orders save - add expenses
+      if (entity === "expenses") {
   try {
     const data = parsePayload(item);
     const localId = String(item.entity_id || item.local_id || data.id || "");
