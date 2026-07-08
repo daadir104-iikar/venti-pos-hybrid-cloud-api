@@ -296,13 +296,18 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
           const now = new Date().toISOString();
           await supabase.from("daily_closings").upsert([{
             local_id: localId,
-            branch_id: "71b4b56b-d082-47dd-9d4a-5555eb5eeb1d",
+            branch_id: String(branchId || ""),
             closing_date: data.closing_date || now.slice(0,10),
+            cash_sales: Number(data.cash_sales || 0),
+            card_sales: Number(data.card_sales || 0),
+            other_sales: Number(data.other_sales || 0),
             total_sales: Number(data.total_sales || 0),
-            total_expenses: Number(data.expenses || 0),
-            cash_total: Number(data.cash_sales || data.counted_cash || 0),
-            note: data.notes || "",
-            closed_by: data.cashier_name || "admin",
+            expenses: Number(data.expenses || 0),
+            expected_cash: Number(data.expected_cash || 0),
+            counted_cash: Number(data.counted_cash || 0),
+            difference: Number(data.difference || 0),
+            notes: data.notes || "",
+            cashier_name: data.cashier_name || "",
             created_at: data.created_at || now
           }], { onConflict: "local_id,branch_id" });
           saved++;
