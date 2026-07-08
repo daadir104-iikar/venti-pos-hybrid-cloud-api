@@ -147,6 +147,69 @@ if (entity === "expenses") {
   }
 }
 
+
+      if (entity === "cashier_shift_closings" || entity === "cashier_shift_closing" || entity === "shift_closings" || entity === "shift_closing") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.id || data.local_id || "");
+          const now = new Date().toISOString();
+
+          if (!localId) {
+            skipped++;
+            results.push({ ok: false, entity: "cashier_shift_closings", skipped: true, reason: "missing local_id" });
+            continue;
+          }
+
+          const row = {
+            branch_id: branchId,
+            device_id: deviceId,
+            local_id: localId,
+            shift_date: data.shift_date || data.closing_date || now.slice(0,10),
+            cashier_name: data.cashier_name || data.cashier || data.user_name || "",
+            cash_sales: Number(data.cash_sales || 0),
+            card_sales: Number(data.card_sales || 0),
+            other_sales: Number(data.other_sales || 0),
+            total_sales: Number(data.total_sales || 0),
+            refunds: Number(data.refunds || data.total_refunds || 0),
+            expected_cash: Number(data.expected_cash || 0),
+            counted_cash: Number(data.counted_cash || 0),
+            difference: Number(data.difference || 0),
+            notes: data.notes || "",
+            created_at: data.created_at || now
+          };
+
+          await supabase
+            .from("cashier_shift_closings")
+            .delete()
+            .eq("branch_id", branchId)
+            .eq("local_id", localId);
+
+          const { error } = await supabase
+            .from("cashier_shift_closings")
+            .insert([row]);
+
+          if (error) throw error;
+
+          await supabase.from("sync_events").insert([{
+            branch_id: branchId,
+            device_id: deviceId,
+            local_id: localId,
+            entity: "cashier_shift_closings",
+            action: item.action || "upsert",
+            status: "synced",
+            created_at: data.created_at || now
+          }]);
+
+          saved++;
+          results.push({ ok: true, entity: "cashier_shift_closings", local_id: localId });
+          continue;
+        } catch (e) {
+          failed++;
+          results.push({ ok: false, entity: "cashier_shift_closings", error: e.message || String(e) });
+          continue;
+        }
+      }
+
       if (entity === "refunds" || entity === "refund") {
         try {
           const data = parsePayload(item);
