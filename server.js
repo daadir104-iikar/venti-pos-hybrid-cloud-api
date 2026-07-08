@@ -1359,28 +1359,17 @@ async function loadDash(){
     const dailyClosings = j.recent_daily_closings || [];
     const dcBody = document.getElementById("dailyClosingsBody");
     if (dcBody) {
-      dcBody.innerHTML = dailyClosings.slice(0,10).map(c => `<tr>
-        <td>${c.closing_date||""}</td>
-        <td>$${Number(c.cash_sales||0).toFixed(2)}</td>
-        <td>$${Number(c.total_sales||0).toFixed(2)}</td>
-        <td>$${Number(c.expenses||0).toFixed(2)}</td>
-        <td>$${Number(c.expected_cash||0).toFixed(2)}</td>
-        <td>$${Number(c.counted_cash||0).toFixed(2)}</td>
-        <td style="color:${Number(c.difference||0)<0?'red':'green'}">$${Number(c.difference||0).toFixed(2)}</td>
-      </tr>`).join("") || "<tr><td colspan=7>No daily closings</td></tr>";
+      dcBody.innerHTML = dailyClosings.slice(0,10).map(function(c) {
+        return "<tr><td>" + (c.closing_date||"") + "</td><td>$" + Number(c.cash_sales||0).toFixed(2) + "</td><td>$" + Number(c.total_sales||0).toFixed(2) + "</td><td>$" + Number(c.expenses||0).toFixed(2) + "</td><td>$" + Number(c.expected_cash||0).toFixed(2) + "</td><td>$" + Number(c.counted_cash||0).toFixed(2) + "</td><td>$" + Number(c.difference||0).toFixed(2) + "</td></tr>";
+      }).join("") || "<tr><td colspan=7>No daily closings</td></tr>";
     }
-
     // Populate customer ledger
     const ledger = j.recent_customer_ledger || [];
     const clBody = document.getElementById("customerLedgerBody");
     if (clBody) {
-      clBody.innerHTML = ledger.slice(0,10).map(c => `<tr>
-        <td>${c.transaction_date||""}</td>
-        <td>${c.customer_name||""}</td>
-        <td>${c.type||""}</td>
-        <td>$${Number(c.amount||0).toFixed(2)}</td>
-        <td>${c.notes||""}</td>
-      </tr>`).join("") || "<tr><td colspan=5>No customer ledger entries</td></tr>";
+      clBody.innerHTML = ledger.slice(0,10).map(function(c) {
+        return "<tr><td>" + (c.transaction_date||"") + "</td><td>" + (c.customer_name||"") + "</td><td>" + (c.type||"") + "</td><td>$" + Number(c.amount||0).toFixed(2) + "</td><td>" + (c.notes||"") + "</td></tr>";
+      }).join("") || "<tr><td colspan=5>No customer ledger entries</td></tr>";
     }
     document.getElementById("ordersBody").innerHTML = orders.length ? orders.map(function(o){
       return "<tr><td>" + esc(pick(o, ["created_at","order_date","date"], "")) +
