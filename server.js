@@ -296,7 +296,7 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
           const now = new Date().toISOString();
           await supabase.from("daily_closings").upsert([{
             local_id: localId,
-            branch_id: branchId,
+            branch_id: "71b4b56b-d082-47dd-9d4a-5555eb5eeb1d",
             closing_date: data.closing_date || now.slice(0,10),
             total_sales: Number(data.total_sales || 0),
             total_expenses: Number(data.expenses || 0),
