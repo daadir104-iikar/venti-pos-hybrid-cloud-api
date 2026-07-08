@@ -289,6 +289,61 @@ if (entity === "expenses") {
         }
       }
 
+      if (entity === "daily_closings" || entity === "daily_closing") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.closing_date || data.id || "");
+          const now = new Date().toISOString();
+          await supabase.from("daily_closings").upsert([{
+            local_id: localId,
+            branch_id: branchId,
+            closing_date: data.closing_date || now.slice(0,10),
+            cash_sales: Number(data.cash_sales || 0),
+            card_sales: Number(data.card_sales || 0),
+            total_sales: Number(data.total_sales || 0),
+            expenses: Number(data.expenses || 0),
+            expected_cash: Number(data.expected_cash || 0),
+            counted_cash: Number(data.counted_cash || 0),
+            difference: Number(data.difference || 0),
+            notes: data.notes || "",
+            created_at: data.created_at || now
+          }], { onConflict: "local_id,branch_id" });
+          saved++;
+          results.push({ ok: true, entity, local_id: localId });
+          continue;
+        } catch(e) {
+          failed++;
+          results.push({ ok: false, entity, error: e.message });
+          continue;
+        }
+      }
+
+      if (entity === "customer_ledger" || entity === "customer_credit") {
+        try {
+          const data = parsePayload(item);
+          const localId = String(item.entity_id || item.local_id || data.id || "");
+          const now = new Date().toISOString();
+          await supabase.from("customer_ledger").upsert([{
+            local_id: localId,
+            branch_id: branchId,
+            customer_id: data.customer_id || null,
+            customer_name: data.customer_name || "",
+            transaction_date: data.transaction_date || now.slice(0,10),
+            type: data.type || "DEBT",
+            amount: Number(data.amount || 0),
+            notes: data.notes || "",
+            created_at: data.created_at || now
+          }], { onConflict: "local_id,branch_id" });
+          saved++;
+          results.push({ ok: true, entity, local_id: localId });
+          continue;
+        } catch(e) {
+          failed++;
+          results.push({ ok: false, entity, error: e.message });
+          continue;
+        }
+      }
+
       if (entity === "payments" || entity === "payment") {
         try {
           const data = parsePayload(item);
