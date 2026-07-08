@@ -146,6 +146,29 @@ if (entity === "expenses") {
     continue;
   }
 }
+      if (entity === "refunds") {
+  try {
+    const data = parsePayload(item);
+    const localId = String(item.entity_id || item.local_id || data.id || "");
+    const now = new Date().toISOString();
+    await supabase.from("refunds").upsert([{
+      local_id: localId,
+      branch_id: branchId,
+      order_id: data.order_id || null,
+      amount: Number(data.amount || 0),
+      reason: data.reason || "",
+      cashier_name: data.cashier_name || "",
+      created_at: data.created_at || now
+    }], { onConflict: "local_id,branch_id" });
+    saved++;
+    results.push({ ok: true, entity, local_id: localId });
+    continue;
+  } catch(e) {
+    failed++;
+    results.push({ ok: false, entity, error: e.message });
+    continue;
+  }
+}
 
 
       if (entity === "cashier_shift_closings" || entity === "cashier_shift_closing" || entity === "shift_closings" || entity === "shift_closing") {
