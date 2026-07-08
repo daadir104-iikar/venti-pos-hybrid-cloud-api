@@ -1084,6 +1084,30 @@ app.get("/admin/panel", (req, res) => {
     </div>
 
     <div class="section card">
+      <h2>Daily Closings</h2>
+      <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
+        <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Cash</th><th>Total</th><th>Expenses</th><th>Expected</th><th>Counted</th><th>Diff</th></tr>
+        ${(d.recent_daily_closings||[]).slice(0,10).map(c=>`<tr>
+          <td>${c.closing_date||""}</td>
+          <td>$${Number(c.cash_sales||0).toFixed(2)}</td>
+          <td>$${Number(c.total_sales||0).toFixed(2)}</td>
+          <td>$${Number(c.expenses||0).toFixed(2)}</td>
+          <td>$${Number(c.expected_cash||0).toFixed(2)}</td>
+          <td>$${Number(c.counted_cash||0).toFixed(2)}</td>
+          <td style="color:${Number(c.difference||0)<0?"red":"green"}">$${Number(c.difference||0).toFixed(2)}</td>
+        </tr>`).join("")}
+      </table>
+      <h2>Customer Credit Ledger</h2>
+      <table border=1 cellpadding=6 style="border-collapse:collapse;width:100%;margin-bottom:20px">
+        <tr style="background:#1a5c38;color:#fff"><th>Date</th><th>Customer</th><th>Type</th><th>Amount</th><th>Notes</th></tr>
+        ${(d.recent_customer_ledger||[]).slice(0,10).map(c=>`<tr>
+          <td>${c.transaction_date||""}</td>
+          <td>${c.customer_name||""}</td>
+          <td>${c.type||""}</td>
+          <td>$${Number(c.amount||0).toFixed(2)}</td>
+          <td>${c.notes||""}</td>
+        </tr>`).join("")}
+      </table>
       <h2>Recent Expenses</h2>
       <table>
         <thead><tr><th>Date</th><th>Category</th><th>Note</th><th>Amount</th></tr></thead>
@@ -1422,6 +1446,16 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       return data || [];
     }, []);
 
+    let recentDailyClosings = await safe(async () => {
+      const { data, error } = await supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(30);
+      if (error) return [];
+      return data || [];
+    }, []);
+    let recentCustomerLedger = await safe(async () => {
+      const { data, error } = await supabase.from("customer_ledger").select("*").order("created_at", { ascending: false }).limit(50);
+      if (error) return [];
+      return data || [];
+    }, []);
     let recentExpenses = await safe(async () => {
       const { data, error } = await supabase.from("expenses").select("*").order("created_at", { ascending: false }).limit(50);
       if (error) return [];
@@ -1651,6 +1685,8 @@ app.get("/admin/api/panel", ventiAdminAuth, async (req, res) => {
       },
       recent_orders: recentOrders,
       recent_expenses: recentExpenses,
+      recent_daily_closings: recentDailyClosings,
+      recent_customer_ledger: recentCustomerLedger,
       best_selling_items: bestSellingItems,
       payment_methods_today: paymentMethodsToday,
       time: new Date().toISOString()
