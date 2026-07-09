@@ -365,15 +365,9 @@ app.post("/sync/upload", requireDevice, async (req, res) => {
             created_at: data.created_at || data.payment_date || data.date || now
           };
 
-          await supabase
-            .from("payments")
-            .delete()
-            .eq("branch_id", branchId)
-            .eq("local_id", localId);
-
           const { error } = await supabase
             .from("payments")
-            .insert([row]);
+            .upsert([row], { onConflict: "branch_id,local_id" });
 
           if (error) throw error;
 
